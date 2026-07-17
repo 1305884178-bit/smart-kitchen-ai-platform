@@ -1,0 +1,36 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+eclipse-workspace
+*.sxx
+*.eap
+*.exm
+*.exw
+*.exd
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+*.nbp
+*.nbx
+*.nbm
+*.nbl
+*.nbo
+*.nbq
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+
+### Environment Variables ###
+.env
