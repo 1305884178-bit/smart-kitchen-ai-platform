@@ -18,4 +18,5 @@ public class Category {
     private String name;
     private Integer sort;
     private LocalDateTime createTime;
+    private LocalDateTime updateTime;
 }

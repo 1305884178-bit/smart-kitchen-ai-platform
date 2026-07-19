@@ -1,4 +1,4 @@
-# 《智慧后厨备菜与点单系统》产品需求文档 (PRD v4.1)
+# 《智慧后厨备菜与点单系统》产品需求文档 (PRD v4.4)
 
 ---
 
@@ -11,6 +11,9 @@
 | v3.0 | 2026-07-14 | 简化B端架构、自动接单、座位号、状态机极简化、LangGraph备菜、评价闭环、Java/Python边界 |
 | v4.0 | 2026-07-14 | **业务模式变更为「先做后付」**：下单→厨房看板完成→结账；新增加菜功能；完成按钮移至厨房看板；撤销留在订单管理；重新设计状态机 |
 | v4.1 | 2026-07-15 | 订单列表菜品缩略展示、LangGraph明确单Agent架构+MCP调用、AI客服改为全量热点缓存、删除sys_operation_log（单管理员场景） |
+| v4.2 | 2026-07-18 | 细化第5章接口清单：Java端按模块拆分为11个子模块表格（含方法/路径/参数/响应/角色），Python端扩展为3个子模块表格；新增分类管理接口（/api/admin/dish/category）、预测确认接口；WebSocket事件模型独立小节 |
+| v4.3 | 2026-07-18 | 新增 6.6 节「代码分层规范」，明确 Controller/Service/Mapper 各层职责边界与 DTO 转换规则 |
+| v4.4 | 2026-07-19 | 优化接口规范：写操作（如分类的增/删/改）不再返回冗余的 Boolean 数据，统一返回无 data 的 Result.success() |
 
 ---
 
@@ -479,34 +482,117 @@ END
 
 ### 5.1 Java 后端接口
 
-| 模块 | 接口 | 说明 |
-|------|------|------|
-| 用户 | `/api/auth/login` | 登录，返回JWT |
-| 菜品 | `/api/dish/list` | 菜品列表（分类/库存/价格） |
-| 订单 | `/api/order/submit` | 下单（Redis Lua预扣库存） |
-| 订单 | `/api/order/{id}/add-dish` | 加菜（追加明细、扣库存、若SERVED回退ORDERED） |
-| 订单 | `/api/order/{id}/pay` | 结账支付（状态→PAID，通知看板） |
-| 订单 | `/api/order/my-list` | 顾客查自己订单 |
-| 订单 | `/api/order/my-detail/{id}` | 顾客查订单详情（含按钮状态） |
-| 订单 | `/api/order/admin-list` | 管理端订单列表 |
-| 订单 | `/api/order/{id}/cancel` | 管理员撤销（ORDERED/SERVED→CANCELLED） |
-| 厨房看板 | `/api/order/{id}/complete` | 厨房看板完成（ORDERED→SERVED） |
-| 厨房看板 | `/api/kitchen-board/orders` | 当前ORDERED订单HTTP快照（重连用） |
-| 评价 | `/api/review/submit` | 提交评价 |
-| 菜品管理 | `/api/admin/dish/**` | CRUD |
-| 库存管理 | `/api/admin/stock/**` | 查看/修改库存 |
-| 知识库 | `/api/admin/knowledge/upload` | 上传文档（调Python处理） |
-| WebSocket | `/ws/kitchen-board` | 厨房看板实时推送 |
+#### 5.1.1 用户认证
 
-### 5.2 Python 后端接口
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| POST | `/api/auth/login` | Body: `{ username, password }` | `{ code:200, data: { token, userId } }` | 登录验证，返回JWT令牌 | C端/B端 |
 
-| 模块 | 接口 | 说明 |
-|------|------|------|
-| AI客服 | `/ai/chat` | SSE流式对话（Agent + Function Calling） |
-| 备菜预测 | `/ai/predict/trigger` | 触发LangGraph预测 |
-| 备菜预测 | `/ai/predict/result?date=` | 查询预测结果 |
-| 知识库 | `/ai/knowledge/process` | 文档向量化存入Milvus |
-| 知识库 | `/ai/knowledge/search` | RAG检索 |
+#### 5.1.2 顾客端——菜品浏览
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| GET | `/api/dish/list` | Query: `?categoryId`（可选） | `{ code:200, data: [{ id, name, categoryId, categoryName, price, image, status, dailyStock, ingredients }] }` | 按分类查询起售菜品列表，含库存与配料信息 | C端 |
+
+#### 5.1.3 顾客端——订单
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| POST | `/api/order/submit` | Body: `{ seatNumber, items: [{ dishId, quantity, remark }] }` | `{ code:200, data: { orderId, orderNo, status:0 } }` | 下单，Redis Lua原子预扣库存，生成ORDERED状态订单 | C端 |
+| POST | `/api/order/{id}/add-dish` | Body: `{ items: [{ dishId, quantity }] }` | `{ code:200, data: { orderId, addedDetails } }` | 加菜：追加oms_order_detail记录，重新预扣库存；若当前状态为SERVED则回退至ORDERED，同时WebSocket推送看板更新 | C端 |
+| POST | `/api/order/{id}/pay` | Body: `{ paymentTradeNo }` | `{ code:200, data: { orderId, status:20 } }` | 结账支付：状态→PAID，填充pay_time和payment_trade_no（幂等校验），WebSocket通知厨房看板卡片消失 | C端 |
+| GET | `/api/order/my-list` | Query: `?page&size` | `{ code:200, data: { total, records: [{ orderId, orderNo, seatNumber, totalAmount, status, createTime }] } }` | 顾客查询自己的历史订单列表（JWT获取userId过滤） | C端 |
+| GET | `/api/order/my-detail/{id}` | Path: `id` | `{ code:200, data: { id, orderNo, seatNumber, totalAmount, status, availableActions: [ADD_DISH, PAY, REVIEW], details: [{ dishName, quantity, price, isAdded }], remark, createTime, updateTime } }` | 顾客查订单详情，含当前状态下的可用按钮列表（ADD_DISH/PAY/REVIEW） | C端 |
+
+#### 5.1.4 管理端——订单管理与撤销
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| GET | `/api/order/admin-list` | Query: `?status&seatNumber&page&size` | `{ code:200, data: { total, records: [{ id, orderNo, seatNumber, dishSummary, totalAmount, status, createTime }] } }` | 管理端订单列表：支持按状态/座位号筛选，菜品列缩略展示（第一道菜名 + 等N道菜） | B端 |
+| POST | `/api/order/{id}/cancel` | Body: `{ cancelReason }` | `{ code:200, data: { orderId, status:90 } }` | 管理员撤销订单：ORDERED或SERVED→CANCELLED，乐观锁校验，库存回滚，WebSocket推送看板卡片消失 | B端 |
+
+#### 5.1.5 管理端——厨房看板
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| POST | `/api/order/{id}/complete` | Path: `id` | `{ code:200, data: { orderId, status:10 } }` | 厨房完成出餐：ORDERED→SERVED，记录complete_time，乐观锁校验 | B端 |
+| GET | `/api/kitchen-board/orders` | — | `{ code:200, data: [{ orderId, seatNumber, dishList: [{ dishName, quantity, remark }], createTime }] }` | 返回当前所有ORDERED订单HTTP快照（按时间升序），用于WebSocket断线重连后数据补齐 | B端 |
+
+#### 5.1.6 管理端——菜品管理
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| POST | `/api/admin/dish/create` | Body: `{ name, categoryId, price, image, dailyStock, alertThreshold, ingredients, newProductInitialStock }` | `{ code:200, data: { dishId } }` | 新增菜品 | B端 |
+| PUT | `/api/admin/dish/update/{id}` | Path: `id`, Body: 同create（部分字段可选） | `{ code:200, data: true }` | 更新菜品信息 | B端 |
+| DELETE | `/api/admin/dish/delete/{id}` | Path: `id` | `{ code:200, data: true }` | 删除菜品 | B端 |
+| GET | `/api/admin/dish/detail/{id}` | Path: `id` | `{ code:200, data: { id, name, categoryId, price, image, status, dailyStock, alertThreshold, ingredients, createTime, updateTime } }` | 查询菜品详细信息 | B端 |
+
+#### 5.1.7 管理端——分类管理
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| GET | `/api/admin/dish/category/list` | — | `{ code:200, data: [{ id, name, sort, createTime }] }` | 获取全部分类列表（按sort升序） | B端 |
+| GET | `/api/admin/dish/category/{id}` | Path: `id` | `{ code:200, data: { id, name, sort, createTime } }` | 查询单个分类详情 | B端 |
+| POST | `/api/admin/dish/category/add` | Body: `{ name, sort }` | `{ code:200, message: "success" }` | 新增菜品分类 | B端 |
+| PUT | `/api/admin/dish/category/update` | Body: `{ id, name, sort }` | `{ code:200, message: "success" }` | 更新分类信息 | B端 |
+| DELETE | `/api/admin/dish/category/delete/{id}` | Path: `id` | `{ code:200, message: "success" }` | 删除分类 | B端 |
+
+#### 5.1.8 管理端——库存管理
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| GET | `/api/admin/stock/view/{dishId}` | Path: `dishId` | `{ code:200, data: { dishId, dishName, dailyStock, alertThreshold, logs: [{ changeType, changeQty, beforeQty, afterQty, orderNo, createTime }] } }` | 查看指定菜品当前库存及变更流水 | B端 |
+| PUT | `/api/admin/stock/update/{dishId}` | Path: `dishId`, Body: `{ changeQty, changeType }` | `{ code:200, data: { dishId, beforeQty, afterQty } }` | 手动修改库存（如盘点调整），记录inv_stock_log流水，触发库存预警检查 | B端 |
+
+#### 5.1.9 管理端——AI知识库上传
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| POST | `/api/admin/knowledge/upload` | Multipart: `file` (PDF/Word) | `{ code:200, data: { documentId, fileName, chunkCount } }` | 上传文档，内部调用Python `/ai/knowledge/process` 进行向量化并存入Milvus，写入ai_knowledge_document元数据 | B端 |
+
+#### 5.1.10 顾客端——餐后评价
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| POST | `/api/review/submit` | Body: `{ orderId, score, comment }` | `{ code:200, data: { reviewId } }` | 提交餐后评价（仅PAID状态订单可见，一单一评，orderId唯一约束），评价数据流入LangGraph预测管道 | C端 |
+
+#### 5.1.11 WebSocket 推送
+
+| 协议 | 路径 | 事件类型 | 推送数据 | 说明 |
+|------|------|----------|----------|------|
+| WS | `/ws/kitchen-board` | `order_created` | `{ eventType, orderId, orderVersion, seatNumber, dishList: [{ dishName, quantity, remark }], createTime }` | 新订单→看板新增卡片 |
+| WS | `/ws/kitchen-board` | `order_updated` | `{ eventType, orderId, orderVersion, seatNumber, dishList }` | 加菜→看板卡片内容更新（SERVED→ORDERED回退时卡片重新出现） |
+| WS | `/ws/kitchen-board` | `order_paid` | `{ eventType, orderId, seatNumber }` | 顾客结账→看板卡片消失 |
+| WS | `/ws/kitchen-board` | `order_cancelled` | `{ eventType, orderId, seatNumber }` | 管理员撤销→看板卡片消失 |
+
+> 断线重连机制：重连后前端请求 `GET /api/kitchen-board/orders` HTTP快照补齐，按 `orderId + orderVersion` 去重与乱序处理。
+
+### 5.2 Python 后端接口（FastAPI）
+
+#### 5.2.1 AI智能客服
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 |
+|------|------|----------|------|------|
+| POST | `/ai/chat` | Body: `{ userId, question, conversationHistory }` | SSE流: `event: message
+data: { content, toolCalls }` | Agent + Function Calling 流式对话，支持语义推荐（Milvus检索）、实时库存查询（调Java接口）、配料查询；首字<1s，热点问题Redis全量缓存 |
+
+#### 5.2.2 AI备菜预测
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 |
+|------|------|----------|------|------|
+| POST | `/ai/predict/trigger` | Body: `{ targetDate }` | `{ code:200, data: { taskId, status: "running" } }` | 触发LangGraph预测流程：supervisor→数据节点并行→时序预测→LLM修正→落库。支持Cron自动（每日02:00）和管理员手动触发 |
+| GET | `/ai/predict/result` | Query: `?date=2026-07-18` | `{ code:200, data: [{ dishId, dishName, baseQuantity, aiSuggestQuantity, finalQuantity, reasoning, confidence, recentAvgScore, status }] }` | 查询指定日期的预测结果列表；confidence<0.4标记低置信度 |
+| PUT | `/ai/predict/confirm` | Body: `{ predictDate, dishId, finalQuantity, confirmedBy }` | `{ code:200, data: { status: "confirmed" } }` | 管理员确认/覆盖预测数量，记录confirmed_by |
+
+#### 5.2.3 AI知识库
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 |
+|------|------|----------|------|------|
+| POST | `/ai/knowledge/process` | Body: `{ documentId, fileUrl, fileName }` | `{ code:200, data: { chunkCount, version } }` | 下载文件→RecursiveCharacterTextSplitter分块→Embedding→存入Milvus，更新ai_knowledge_document版本号 |
+| POST | `/ai/knowledge/search` | Body: `{ query, topK=3 }` | `{ code:200, data: [{ content, score, documentName }] }` | Milvus向量检索，返回Top-K相关文档片段，供Agent Function Calling调用 |
+
+> **跨语言调用协议**：Java 通过 `RestTemplate` 以 HTTP POST JSON 方式调用上述 Python 接口，Python 服务地址由 `smart-kitchen.python-service.url` 配置项指定。
+
 
 ### 5.3 调用关系图
 
@@ -565,15 +651,22 @@ Python (FastAPI) ──▶ MySQL (销量/评价查询)
 - 备菜：仅 Top N 重点菜走 LLM，其余用时序预测。
 - RAG：检索截断 Top-3。
 
-### 6.5 可观测性
+### 6.6 代码分层规范
 
-| 指标 | 用途 |
-|------|------|
-| 下单/加菜接口耗时 | 性能监控 |
-| Redis Lua 扣减成功率 | 库存异常告警 |
-| AI客服 SSE 首字时间 | 体验监控 |
-| 备菜预测 LLM 成功率/降级次数 | AI链路稳定 |
-| RAG 检索命中率 | 知识库质量 |
+为了保持代码的可维护性与高内聚低耦合，Java 后端必须严格遵循以下三层架构规范：
+
+1. **Controller 层（控制层）**
+   - **核心职责**：接收前端 HTTP 请求、基础参数校验、调用对应的 Service 接口、将结果包装为统一的 `Result` 对象返回。
+   - **限制规则**：严禁在 Controller 层包含任何业务逻辑；严禁在 Controller 中进行 DTO 到 Entity 的数据映射与转换；严禁在 Controller 中直接构建 MyBatis-Plus 的 `QueryWrapper` 等数据库查询条件。
+
+2. **Service 层（业务逻辑层）**
+   - **核心职责**：承载所有核心业务逻辑。
+   - **转换职责**：负责将前端传入的 `DTO` 对象转换为与数据库对应的 `Entity` 实体类，或者将 `Entity` 转换为返回给前端的 `VO`/`DTO`。
+   - **查询职责**：所有的 `QueryWrapper`、`LambdaQueryWrapper` 构建逻辑必须放在 Service 的实现类（ServiceImpl）中，并配合 Mapper 进行查询。
+
+3. **Mapper 层（数据持久层）**
+   - **核心职责**：负责与 MySQL 数据库进行交互，执行 CRUD 操作。
+   - **原则**：只负责最纯粹的 SQL 操作，不包含任何业务处理逻辑。
 
 ---
 

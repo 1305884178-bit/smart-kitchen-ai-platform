@@ -1,6 +1,6 @@
 -- 创建数据库
-CREATE DATABASE IF NOT EXISTS `smart_kitchen` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE `smart_kitchen`;
+
+
 
 -- 1. 订单主表
 CREATE TABLE IF NOT EXISTS `oms_order` (
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS `oms_order` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_no` (`order_no`),
   UNIQUE KEY `uk_payment_trade_no` (`payment_trade_no`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单主表';
+)  COMMENT='订单主表';
 
 -- 2. 订单明细表
 CREATE TABLE IF NOT EXISTS `oms_order_detail` (
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS `oms_order_detail` (
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (`id`),
   KEY `idx_order_id` (`order_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单明细表';
+)  COMMENT='订单明细表';
 
 -- 3. 评价表
 CREATE TABLE IF NOT EXISTS `oms_review` (
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS `oms_review` (
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_id` (`order_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='评价表';
+)  COMMENT='评价表';
 
 -- 4. 菜品表
 CREATE TABLE IF NOT EXISTS `pms_dish` (
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS `pms_dish` (
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='菜品表';
+)  COMMENT='菜品表';
 
 -- 5. 菜品分类表
 CREATE TABLE IF NOT EXISTS `pms_category` (
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS `pms_category` (
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='菜品分类表';
+)  COMMENT='菜品分类表';
 
 -- 6. AI备菜预测记录表
 CREATE TABLE IF NOT EXISTS `ai_prediction_record` (
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS `ai_prediction_record` (
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_date_dish` (`predict_date`, `dish_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI备菜预测记录表';
+)  COMMENT='AI备菜预测记录表';
 
 -- 7. RAG文档元数据表
 CREATE TABLE IF NOT EXISTS `ai_knowledge_document` (
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS `ai_knowledge_document` (
   `effective_from` datetime DEFAULT NULL COMMENT '生效时间',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG文档元数据表';
+)  COMMENT='RAG文档元数据表';
 
 -- 8. 库存变更流水表
 CREATE TABLE IF NOT EXISTS `inv_stock_log` (
@@ -119,4 +119,4 @@ CREATE TABLE IF NOT EXISTS `inv_stock_log` (
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   PRIMARY KEY (`id`),
   KEY `idx_dish_id` (`dish_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='库存变更流水表';
+)  COMMENT='库存变更流水表';

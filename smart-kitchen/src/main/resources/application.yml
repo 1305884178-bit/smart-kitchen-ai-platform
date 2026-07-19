@@ -12,7 +12,7 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/smart_kitchen?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false
     username: ${DB_USER:root}
-    password: ${DB_PWD:root}
+    password: ${DB_PWD:1234}
     hikari:
       minimum-idle: 5
       maximum-pool-size: 20
