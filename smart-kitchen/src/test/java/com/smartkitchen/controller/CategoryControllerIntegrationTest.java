@@ -11,6 +11,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.smartkitchen.config.JwtUtil;
+import org.junit.jupiter.api.BeforeEach;
+
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -19,9 +22,20 @@ public class CategoryControllerIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private JwtUtil jwtUtil;
+
+    private String token;
+
+    @BeforeEach
+    public void setup() {
+        token = jwtUtil.generateToken(1000L, null, "ADMIN");
+    }
+
     @Test
     public void testListCategories() throws Exception {
-        mockMvc.perform(get("/api/admin/dish/category/list"))
+        mockMvc.perform(get("/api/admin/dish/category/list")
+                .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data").isArray())

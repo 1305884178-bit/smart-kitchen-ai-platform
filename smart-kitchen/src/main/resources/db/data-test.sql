@@ -1,10 +1,17 @@
 -- 清理旧数据（可选，方便重复运行）
 SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE `sys_user`;
 TRUNCATE TABLE `pms_category`;
 TRUNCATE TABLE `pms_dish`;
 TRUNCATE TABLE `oms_order`;
 TRUNCATE TABLE `oms_order_detail`;
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- 0. 插入用户数据
+INSERT INTO `sys_user` (`id`, `username`, `password`, `nickname`, `role`, `create_time`) VALUES
+(1000, 'admin', '123456', '管理员', 'ADMIN', NOW()),
+(1001, 'customer1', '123456', '顾客张三', 'CUSTOMER', NOW()),
+(1002, 'customer2', '123456', '顾客李四', 'CUSTOMER', NOW());
 
 -- 1. 插入菜品分类
 INSERT INTO `pms_category` (`id`, `name`, `sort`, `create_time`) VALUES

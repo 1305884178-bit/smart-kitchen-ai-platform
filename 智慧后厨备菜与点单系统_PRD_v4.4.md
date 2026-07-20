@@ -34,8 +34,8 @@
 | 维度 | 约定 |
 |------|------|
 | 门店 | 单门店 |
-| 用餐类型 | 堂食，顾客输入座位号 |
-| 支付时机 | 餐后结账（非预支付） |
+| 用餐类型 | 堂食，从可用座位中选择座位号 |
+| 支付时机 | 点击确认结账（非预支付，Mock支付） |
 | 库存粒度 | 菜品级库存 |
 | B 端终端 | 一套 PC Web 管理端（含厨房看板子页面） |
 | B 端用户 | 单管理员（不设多员工/多角色） |
@@ -59,7 +59,7 @@
 
 | 角色 | 接入端 | 核心职责 |
 |------|--------|----------|
-| **顾客 (C端)** | 小程序 / H5 | 浏览菜单、下单、加菜、结账支付、AI客服咨询、查看订单状态、餐后评价 |
+| **顾客 (C端)** | 小程序（wx.login 免密登录） | 浏览菜单、下单、加菜、确认结账、AI客服咨询、查看订单状态、餐后评价 |
 | **餐厅管理员 (B端)** | PC Web 端 | 厨房看板（完成出餐）、订单管理（撤销/查看）、菜品管理、库存管理、AI备菜预测触发与确认、AI知识库维护 |
 
 ---
@@ -74,7 +74,7 @@
 
 - **前置条件**：用户已登录（JWT鉴权），菜品状态为「起售」。
 - **操作流程**：
-  1. 用户选择菜品，输入**座位号**（如 A05），加入购物车。
+  1. 用户从可用座位中**选择座位号**（如 A05），浏览菜单并加入购物车。
   2. 点击「下单」，前端校验菜品是否下架（弱校验，仅提示）。
   3. 后端：
      - 执行 **Redis + Lua 库存预扣减**（原子操作）。
@@ -90,12 +90,12 @@
   3. 如果当前状态为 SERVED，自动回退到 ORDERED（新菜需要做）。
 - **边界**：PAID、CANCELLED 状态下 [加菜] 按钮不显示。
 
-#### 1.3 结账支付
+#### 1.3 确认结账
 
 - **入口**：ORDERED 或 SERVED 状态下，订单详情页显示 [结账] 按钮。
 - **操作流程**：
-  1. 点击结账 → 跳转支付页。
-  2. 支付成功 → 状态变为 `PAID`，顾客页显示「已结账」+ [评价] 入口。
+  1. 点击确认结账 → 后端直接修改状态为 PAID，生成模拟流水号。
+  2. 结账成功 → 顾客页显示「已结账」+ [评价] 入口，生产环境可扩展真实微信支付。
   3. 通知厨房看板该座位号订单已结账（卡片消失）。
 
 #### 1.4 订单状态机（v4.0）
@@ -109,7 +109,7 @@ ORDERED（已下单）
   │     │  顾客可见：[加菜] [结账]
   │     │  厨房看板：不显示（菜已上齐）
   │     │
-  │     ├── 顾客[结账]支付 ──→ PAID（已结账）
+  │     ├── 顾客[确认结账] ──→ PAID（已结账）
   │     │    顾客可见：[评价]
   │     │    厨房看板：不显示
   │     │
@@ -119,7 +119,7 @@ ORDERED（已下单）
   │     └── 管理员[撤销] ──→ CANCELLED（已撤销）
   │          厨房看板：卡片消失
   │
-  ├── 顾客[结账]支付 ──→ PAID（跳过SERVED）
+  ├── 顾客[确认结账] ──→ PAID（跳过SERVED）
   │    厨房看板：卡片消失
   │
   └── 管理员[撤销] ──→ CANCELLED（已撤销）
@@ -132,7 +132,7 @@ ORDERED（已下单）
 |--------|--------|--------|------------|----------|
 | 0 | ORDERED | 顾客下单 | [加菜] [结账] | 显示卡片 + [完成] |
 | 10 | SERVED | 厨房看板点完成 | [加菜] [结账] | 不显示 |
-| 20 | PAID | 顾客支付 | [评价] | 不显示 |
+| 20 | PAID | 顾客确认结账 | [评价] | 不显示 |
 | 90 | CANCELLED | 管理员撤销 | 无 | 不显示 |
 
 **关键规则**：
@@ -157,11 +157,11 @@ ORDERED（已下单）
     │                        按钮：[加菜] [结账]
     │                          │
     │                          ├─ 点[加菜] → 回到[订单详情页 - ORDERED]
-    │                          └─ 点[结账]支付 → [订单详情页 - PAID]
+    │                          └─ 点[确认结账] → [订单详情页 - PAID]
     │                                             显示：已结账
     │                                             按钮：[评价]
     │
-    ├─ 点[结账]支付 ──→ [订单详情页 - PAID]（跳过SERVED）
+    ├─ 点[确认结账] ──→ [订单详情页 - PAID]（跳过SERVED）
     │
     └─ 管理员撤销 ──→ [订单详情页 - CANCELLED]
                       显示：商家已撤销
@@ -364,7 +364,20 @@ END
 
 ## 四、核心数据模型
 
-### 4.1 `oms_order`（订单主表）
+### 4.1 `sys_user`（系统用户表）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | bigint PK | 自增 |
+| `openid` | varchar(64) UNIQUE | 微信openid（可为空） |
+| `username` | varchar(32) UNIQUE | 登录账号/手机号 |
+| `password` | varchar(128) | 密码（PC端备用） |
+| `nickname` | varchar(32) | 昵称 |
+| `avatar` | varchar(256) | 头像 |
+| `role` | varchar(16) | CUSTOMER / ADMIN |
+| `create_time` | datetime | - |
+
+### 4.2 `oms_order`（订单主表）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -376,7 +389,7 @@ END
 | `status` | tinyint | 0-ORDERED / 10-SERVED / 20-PAID / 90-CANCELLED |
 | `cancel_reason` | varchar(16) | MERCHANT_CANCEL |
 | `pay_time` | datetime | 支付时间（结账时填充） |
-| `payment_trade_no` | varchar(64) UNIQUE | 支付流水号（幂等键） |
+| `payment_trade_no` | varchar(64) UNIQUE | 支付流水号（Mock支付时自动生成UUID） |
 | `complete_time` | datetime | 厨房完成时间 |
 | `operator_id` | bigint | 最后操作管理员 |
 | `remark` | varchar(256) | 顾客备注 |
@@ -486,9 +499,17 @@ END
 
 | 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
 |------|------|----------|------|------|------|
-| POST | `/api/auth/login` | Body: `{ username, password }` | `{ code:200, data: { token, userId } }` | 登录验证，返回JWT令牌 | C端/B端 |
+| POST | `/api/auth/wx-login` | Body: `{ code }` | `{ code:200, data: { token, userId, role, needRegister } }` | 微信免密登录，新用户返回 needRegister=true | C端 |
+| POST | `/api/auth/register` | Body: `{ code, nickname, avatar, phone }` | `{ code:200, data: { token, userId, role } }` | 新用户注册并绑定微信 | C端 |
+| POST | `/api/auth/login` | Body: `{ username, password }` | `{ code:200, data: { token, userId, role } }` | 账号密码登录（B端管理或PC测试用） | B端/C端 |
 
-#### 5.1.2 顾客端——菜品浏览
+#### 5.1.2 顾客端——选座
+
+| 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
+|------|------|----------|------|------|------|
+| GET | `/api/seat/available` | — | `{ code:200, data: ["A01", "B02", ...] }` | 获取当前空闲座位列表（剔除订单状态为0或10的座位） | C端 |
+
+#### 5.1.3 顾客端——菜品浏览
 
 | 方法 | 路径 | 请求参数 | 响应 | 说明 | 角色 |
 |------|------|----------|------|------|------|
@@ -500,7 +521,7 @@ END
 |------|------|----------|------|------|------|
 | POST | `/api/order/submit` | Body: `{ seatNumber, items: [{ dishId, quantity, remark }] }` | `{ code:200, data: { orderId, orderNo, status:0 } }` | 下单，Redis Lua原子预扣库存，生成ORDERED状态订单 | C端 |
 | POST | `/api/order/{id}/add-dish` | Body: `{ items: [{ dishId, quantity }] }` | `{ code:200, data: { orderId, addedDetails } }` | 加菜：追加oms_order_detail记录，重新预扣库存；若当前状态为SERVED则回退至ORDERED，同时WebSocket推送看板更新 | C端 |
-| POST | `/api/order/{id}/pay` | Body: `{ paymentTradeNo }` | `{ code:200, data: { orderId, status:20 } }` | 结账支付：状态→PAID，填充pay_time和payment_trade_no（幂等校验），WebSocket通知厨房看板卡片消失 | C端 |
+| POST | `/api/order/{id}/pay` | Body: `{ }` | `{ code:200, data: { orderId, status:20 } }` | 确认结账：状态→PAID，生成模拟流水号，WebSocket通知厨房看板卡片消失 | C端 |
 | GET | `/api/order/my-list` | Query: `?page&size` | `{ code:200, data: { total, records: [{ orderId, orderNo, seatNumber, totalAmount, status, createTime }] } }` | 顾客查询自己的历史订单列表（JWT获取userId过滤） | C端 |
 | GET | `/api/order/my-detail/{id}` | Path: `id` | `{ code:200, data: { id, orderNo, seatNumber, totalAmount, status, availableActions: [ADD_DISH, PAY, REVIEW], details: [{ dishName, quantity, price, isAdded }], remark, createTime, updateTime } }` | 顾客查订单详情，含当前状态下的可用按钮列表（ADD_DISH/PAY/REVIEW） | C端 |
 

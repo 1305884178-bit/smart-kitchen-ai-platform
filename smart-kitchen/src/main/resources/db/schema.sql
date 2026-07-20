@@ -2,6 +2,22 @@
 CREATE DATABASE IF NOT EXISTS `smart_kitchen` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE `smart_kitchen`;
 
+-- 0. 系统用户表
+CREATE TABLE IF NOT EXISTS `sys_user` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `openid` varchar(64) DEFAULT NULL COMMENT '微信openid（微信用户凭此登录）',
+  `username` varchar(32) DEFAULT NULL COMMENT '登录账号（仅管理员/PC端使用，微信用户留空）',
+  `password` varchar(128) DEFAULT NULL COMMENT '密码（仅管理员/PC端使用，微信用户留空）',
+  `phone` varchar(16) DEFAULT NULL COMMENT '手机号',
+  `nickname` varchar(32) DEFAULT NULL COMMENT '昵称',
+  `avatar` varchar(256) DEFAULT NULL COMMENT '头像',
+  `role` varchar(16) NOT NULL DEFAULT 'CUSTOMER' COMMENT 'CUSTOMER / ADMIN',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_openid` (`openid`),
+  UNIQUE KEY `uk_username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统用户表';
+
 -- 1. 订单主表
 CREATE TABLE IF NOT EXISTS `oms_order` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增',
