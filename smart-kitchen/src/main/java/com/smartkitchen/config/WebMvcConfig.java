@@ -15,8 +15,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(jwtInterceptor)
-                .addPathPatterns("/api/**")
-                .excludePathPatterns("/api/auth/**", "/error");
+                .addPathPatterns("/api/**") // 拦截所有 /api 开头的请求
+                .excludePathPatterns("/api/auth/**", "/error") // 放行登录和注册接口
+                .excludePathPatterns("/api/seat/**"); // 放行选座接口（未登录也能看座位）
     }
 
     @Override
