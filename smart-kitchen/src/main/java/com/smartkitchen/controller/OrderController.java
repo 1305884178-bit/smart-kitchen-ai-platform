@@ -1,6 +1,10 @@
 package com.smartkitchen.controller;
 
 import com.smartkitchen.common.Result;
+import com.smartkitchen.dto.OrderSubmitDTO;
+import com.smartkitchen.service.OrderService;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -10,13 +14,18 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/order")
 public class OrderController {
 
+    @Autowired
+    private OrderService orderService;
+
     /**
      * 提交订单（包含 Redis Lua 预扣库存逻辑）
      * @return 返回订单创建结果
      */
     @PostMapping("/submit")
-    public Result<Object> submitOrder() {
-        return Result.success(null);
+    public Result<String> submitOrder(@RequestBody OrderSubmitDTO submitDTO, HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        String orderNo = orderService.submitOrder(submitDTO, userId);
+        return Result.success(orderNo);
     }
 
     /**
@@ -36,7 +45,8 @@ public class OrderController {
      */
     @PostMapping("/{id}/pay")
     public Result<Object> pay(@PathVariable("id") Long id) {
-        return Result.success(null);
+        orderService.payOrder(id);
+        return Result.success("支付成功");
     }
 
     /**
@@ -74,7 +84,8 @@ public class OrderController {
      */
     @PostMapping("/{id}/cancel")
     public Result<Object> cancel(@PathVariable("id") Long id) {
-        return Result.success(null);
+        orderService.cancelOrder(id);
+        return Result.success("撤销成功");
     }
 
     /**

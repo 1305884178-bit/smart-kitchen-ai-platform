@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.smartkitchen.mapper.DishMapper">
+
+    <!-- 乐观锁扣减库存：仅当库存充足时才扣减 -->
+    <update id="deductStock">
+        UPDATE pms_dish
+        SET daily_stock = daily_stock - #{quantity},
+            update_time = NOW()
+        WHERE id = #{id} AND daily_stock >= #{quantity}
+    </update>
+
+</mapper>
