@@ -1,5 +1,9 @@
 package com.smartkitchen.service.impl;
 
+import com.smartkitchen.config.KitchenBoardWebSocketHandler;
+import com.smartkitchen.config.CustomerWebSocketHandler;
+import com.smartkitchen.dto.OrderVO;
+import org.springframework.beans.BeanUtils;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.smartkitchen.common.OrderDetailAddedEnum;
 import com.smartkitchen.common.OrderStatusEnum;
@@ -37,6 +41,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Autowired
     private OrderDetailService orderDetailService;
+
+    @Autowired
+    private KitchenBoardWebSocketHandler kitchenBoardWebSocketHandler;
+
+    @Autowired
+    private CustomerWebSocketHandler customerWebSocketHandler;
 
     private static final String STOCK_PREFIX = "dish:stock:";
 
@@ -129,6 +139,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 }
             }
 
+            kitchenBoardWebSocketHandler.sendMessage("{\"type\":\"NEW_ORDER\",\"message\":\"有新订单了\"}");
             return orderNo;
         } catch (Exception e) {
             // 数据库操作失败，执行补偿操作：将已扣减的 Redis 库存退还
@@ -187,5 +198,52 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (!keys.isEmpty()) {
             stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
         }
+    }
+
+    @Override
+    public List<OrderVO> getOrderedOrders() {
+        // 1. 查询状态为 ORDERED 的订单
+        List<Order> orders = this.lambdaQuery()
+                .eq(Order::getStatus, OrderStatusEnum.ORDERED.getCode())
+                .orderByAsc(Order::getCreateTime)
+                .list();
+
+        if (orders == null || orders.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 2. 批量查询订单明细
+        List<Long> orderIds = orders.stream().map(Order::getId).toList();
+        List<OrderDetail> allDetails = orderDetailService.lambdaQuery()
+                .in(OrderDetail::getOrderId, orderIds)
+                .list();
+
+        // 3. 组装 VO
+        return orders.stream().map(order -> {
+            OrderVO vo = new OrderVO();
+            BeanUtils.copyProperties(order, vo);
+            List<OrderDetail> details = allDetails.stream()
+                    .filter(d -> d.getOrderId().equals(order.getId()))
+                    .toList();
+            vo.setDetails(details);
+            return vo;
+        }).toList();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void serveOrder(Long orderId) {
+        Order order = this.getById(orderId);
+        if (order == null) {
+            throw new RuntimeException("订单不存在");
+        }
+        if (order.getStatus() != OrderStatusEnum.ORDERED.getCode()) {
+            throw new RuntimeException("当前状态不可操作出餐");
+        }
+        order.setStatus(OrderStatusEnum.SERVED.getCode());
+        order.setUpdateTime(LocalDateTime.now());
+        this.updateById(order);
+
+        customerWebSocketHandler.sendMessageToUser(order.getUserId(), "{\"type\":\"ORDER_SERVED\",\"message\":\"您的订单已出餐，请取餐\"}");
     }
 }

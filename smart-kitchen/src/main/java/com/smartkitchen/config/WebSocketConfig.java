@@ -14,9 +14,14 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Autowired
     private WebSocketHandler kitchenBoardWebSocketHandler;
 
+    @Autowired
+    private CustomerWebSocketHandler customerWebSocketHandler;
+
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(kitchenBoardWebSocketHandler, "/ws/kitchen-board")
+                .setAllowedOrigins("*");
+        registry.addHandler(customerWebSocketHandler, "/ws/customer")
                 .setAllowedOrigins("*");
     }
 }

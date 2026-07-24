@@ -2,7 +2,10 @@ package com.smartkitchen.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.smartkitchen.dto.OrderSubmitDTO;
+import com.smartkitchen.dto.OrderVO;
 import com.smartkitchen.entity.Order;
+
+import java.util.List;
 
 public interface OrderService extends IService<Order> {
 
@@ -25,4 +28,15 @@ public interface OrderService extends IService<Order> {
      * @param orderId 订单ID
      */
     void cancelOrder(Long orderId);
+    /**
+     * 获取所有状态为待出餐（ORDERED）的订单及其明细
+     * @return 订单视图对象列表
+     */
+    List<OrderVO> getOrderedOrders();
+
+    /**
+     * 厨房完成出餐操作
+     * @param orderId 订单ID
+     */
+    void serveOrder(Long orderId);
 }
