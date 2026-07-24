@@ -54,19 +54,31 @@
 
 ## ⚪ Phase 5: AI 智能服务（Python 端，待办）
 **目标**：部署 Python FastAPI 服务，实现 LangGraph 备菜预测、AI 客服、RAG 知识库三大 AI 能力。
-*   [ ] **AI 备菜预测（LangGraph 多节点）**
-    *   搭建 FastAPI 工程，集成 LangGraph。
-    *   实现 8 个节点：supervisor、get_sales_30d、get_tomorrow_weather、get_holiday_info、get_recent_reviews、time_series_predict、llm_adjust、save_result。
-    *   暴露 `/ai/predict/trigger`、`/ai/predict/result`、`/ai/predict/confirm` 三个接口。
-    *   Java 端通过 RestTemplate 调用 Python 接口。
-*   [ ] **AI 客服（单Agent + Function Calling）**
-    *   挂载两个工具函数：`search_menu(query)` 菜品检索、`search_knowledge(query)` RAG 检索。
-    *   暴露 `/ai/chat` SSE 流式接口，前端实时展示 AI 回答。
-    *   问答结果通过 Redis 全量热点缓存降低 LLM 成本。
-*   [ ] **AI 知识库（RAG）**
+
+> **实现顺序建议**：基础设施与数据表准备 -> RAG 知识库 -> AI 客服 -> AI 备菜预测 -> Java 端代理集成。
+
+*   [ ] **Step 1: 基础设施与数据表准备**
+    *   搭建 FastAPI 工程，集成 LangGraph 依赖。
+    *   搭建 Milvus 向量数据库环境。
+    *   在 MySQL 中执行 DDL，创建 `ai_prediction_record` 和 `ai_knowledge_document` 表。
+*   [ ] **Step 2: AI 知识库（RAG）**
+    *   实现文档分块策略：`RecursiveCharacterTextSplitter(chunk_size=500, overlap=50)`。
+    *   实现文档版本管理机制（支持 version/status/effective_from）。
     *   暴露 `/ai/knowledge/process`（文档向量化）和 `/ai/knowledge/search`（Milvus 向量检索）。
-    *   Java 端 `/api/admin/knowledge/upload` 接收文件后调 Python process 接口。
-    *   前端 AI 客服调用 search 接口获取 Top-K 文档片段注入 Prompt。
+*   [ ] **Step 3: AI 客服（单Agent + Function Calling）**
+    *   挂载 3 个工具函数：`search_dish_by_preference` (RAG语义推荐)、`check_dish_inventory` (MySQL实时库存查询)、`get_dish_ingredients` (配料/过敏原查询)。
+    *   暴露 `/ai/chat` SSE 流式接口，首字响应 < 1s，前端实时展示 AI 回答。
+    *   实现问答结果 Redis 全量热点缓存（TTL 10分钟），降低 LLM 成本。
+*   [ ] **Step 4: AI 备菜预测（LangGraph 多节点）**
+    *   实现 8 个节点：supervisor、get_sales_30d、get_tomorrow_weather、get_holiday_info、get_recent_reviews、time_series_predict、llm_adjust、save_result。
+    *   使用 **MCP 协议** 调用天气和节假日外部 API。
+    *   **完善降级策略**：外部 API 不可用时跳过，LLM 超时或 JSON 格式错误时降级为时序预测。
+    *   实现触发机制：定时任务（Cron 每日 02:00 触发）与管理员手动触发。
+    *   暴露 `/ai/predict/trigger`、`/ai/predict/result`、`/ai/predict/confirm` 三个接口，支持管理员人工干预与覆盖预测量。
+*   [ ] **Step 5: Java 端代理接口集成**
+    *   实现 B 端备菜预测代理接口：`/api/admin/predict/trigger`、`/api/admin/predict/result`、`/api/admin/predict/confirm`。
+    *   实现 B 端知识库上传代理接口：`/api/admin/knowledge/upload`。
+    *   Java 端通过 RestTemplate 调用 Python 接口。
 
 ---
 
