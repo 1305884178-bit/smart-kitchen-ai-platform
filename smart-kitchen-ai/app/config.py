@@ -22,6 +22,10 @@ class Settings:
     llm_base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
     llm_model = os.getenv("LLM_MODEL", "gpt-4o")
 
+    embedding_api_key = os.getenv("EMBEDDING_API_KEY", "")
+    embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://api.openai.com/v1")
+    embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+
     app_port = int(os.getenv("APP_PORT", "8000"))
 
 settings = Settings()

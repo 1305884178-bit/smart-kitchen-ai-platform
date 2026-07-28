@@ -57,15 +57,15 @@
 
 > **实现顺序建议**：基础设施与数据表准备 -> RAG 知识库 -> AI 客服 -> AI 备菜预测 -> Java 端代理集成。
 
-*   [ ] **Step 1: 基础设施与数据表准备**
+*   [x] **Step 1: 基础设施与数据表准备**
     *   搭建 FastAPI 工程，集成 LangGraph 依赖。
     *   搭建 Milvus 向量数据库环境。
     *   在 MySQL 中执行 DDL，创建 `ai_prediction_record` 和 `ai_knowledge_document` 表。
-*   [ ] **Step 2: AI 知识库（RAG）**
+*   [x] **Step 2: AI 知识库（RAG）**
     *   实现文档分块策略：`RecursiveCharacterTextSplitter(chunk_size=500, overlap=50)`。
     *   实现文档版本管理机制（支持 version/status/effective_from）。
     *   暴露 `/ai/knowledge/process`（文档向量化）和 `/ai/knowledge/search`（Milvus 向量检索）。
-*   [ ] **Step 3: AI 客服（单Agent + Function Calling）**
+*   [x] **Step 3: AI 客服（单Agent + Function Calling）**
     *   挂载 3 个工具函数：`search_dish_by_preference` (RAG语义推荐)、`check_dish_inventory` (MySQL实时库存查询)、`get_dish_ingredients` (配料/过敏原查询)。
     *   暴露 `/ai/chat` SSE 流式接口，首字响应 < 1s，前端实时展示 AI 回答。
     *   实现问答结果 Redis 全量热点缓存（TTL 10分钟），降低 LLM 成本。
@@ -76,6 +76,8 @@
     *   实现触发机制：定时任务（Cron 每日 02:00 触发）与管理员手动触发。
     *   暴露 `/ai/predict/trigger`、`/ai/predict/result`、`/ai/predict/confirm` 三个接口，支持管理员人工干预与覆盖预测量。
 *   [ ] **Step 5: Java 端代理接口集成**
+    *   **提醒**：将 `dish_tools.py` 中三步工具函数（`search_dish_by_preference` 除外，它走 Milvus RAG）的 pymysql 直连替换为调用 Java 代理接口，统一数据层归属。
+    *   Java 端新增菜品查询代理接口：供 Python `check_dish_inventory` 和 `get_dish_ingredients` 调用。
     *   实现 B 端备菜预测代理接口：`/api/admin/predict/trigger`、`/api/admin/predict/result`、`/api/admin/predict/confirm`。
     *   实现 B 端知识库上传代理接口：`/api/admin/knowledge/upload`。
     *   Java 端通过 RestTemplate 调用 Python 接口。
