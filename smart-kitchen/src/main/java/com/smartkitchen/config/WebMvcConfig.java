@@ -17,7 +17,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(jwtInterceptor)
                 .addPathPatterns("/api/**") // 拦截所有 /api 开头的请求
                 .excludePathPatterns("/api/auth/**", "/error") // 放行登录和注册接口
-                .excludePathPatterns("/api/seat/**"); // 放行选座接口（未登录也能看座位）
+                .excludePathPatterns("/api/seat/**") // 放行选座接口（未登录也能看座位）
+                .excludePathPatterns("/api/proxy/**"); // 放行代理接口（供Python AI服务内部调用）
     }
 
     @Override

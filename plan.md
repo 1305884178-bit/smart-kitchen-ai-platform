@@ -2,7 +2,7 @@
 
 > 本文档用于管理项目的迭代节奏，将大目标拆解为可执行的 Sprint，方便跟踪进度。
 
-## 🎯 当前整体进度：Phase 2 已完成，准备进入 Phase 3
+## 🎯 当前整体进度：Phase 5 已完成，准备进入 Phase 6
 
 ---
 
@@ -52,7 +52,7 @@
 
 ---
 
-## ⚪ Phase 5: AI 智能服务（Python 端，待办）
+## 🟢 Phase 5: AI 智能服务（Python 端，已完成）
 **目标**：部署 Python FastAPI 服务，实现 LangGraph 备菜预测、AI 客服、RAG 知识库三大 AI 能力。
 
 > **实现顺序建议**：基础设施与数据表准备 -> RAG 知识库 -> AI 客服 -> AI 备菜预测 -> Java 端代理集成。
@@ -69,18 +69,20 @@
     *   挂载 3 个工具函数：`search_dish_by_preference` (RAG语义推荐)、`check_dish_inventory` (MySQL实时库存查询)、`get_dish_ingredients` (配料/过敏原查询)。
     *   暴露 `/ai/chat` SSE 流式接口，首字响应 < 1s，前端实时展示 AI 回答。
     *   实现问答结果 Redis 全量热点缓存（TTL 10分钟），降低 LLM 成本。
-*   [ ] **Step 4: AI 备菜预测（LangGraph 多节点）**
-    *   实现 8 个节点：supervisor、get_sales_30d、get_tomorrow_weather、get_holiday_info、get_recent_reviews、time_series_predict、llm_adjust、save_result。
-    *   使用 **MCP 协议** 调用天气和节假日外部 API。
-    *   **完善降级策略**：外部 API 不可用时跳过，LLM 超时或 JSON 格式错误时降级为时序预测。
-    *   实现触发机制：定时任务（Cron 每日 02:00 触发）与管理员手动触发。
-    *   暴露 `/ai/predict/trigger`、`/ai/predict/result`、`/ai/predict/confirm` 三个接口，支持管理员人工干预与覆盖预测量。
-*   [ ] **Step 5: Java 端代理接口集成**
+*   [x] **Step 4: AI 备菜预测（LangGraph Supervisor + 子图）**
+    *   [x] 架构：Supervisor 多智能体入口 → 根据 task_type 路由到备菜预测子图（predict_agent），未知类型走 other_node 兜底返回不支持提示
+    *   [x] 预测子图 7 个节点：get_sales_30d、get_tomorrow_weather、get_holiday_info、get_recent_reviews、time_series_predict、llm_adjust、save_result
+    *   [x] LLM Prompt 外置到 `app/prompts/predict_llm_prompt.txt`，Supervisor 路由提示词外置到 `app/prompts/supervisor_prompt.txt`
+    *   [x] 使用 **MCP 协议** 调用天气和节假日外部 API（天气: OpenWeatherMap 5日预报/3小时间隔聚合为日级数据; 节假日: ModelScope `china-festival-mcp` 通过 JSON-RPC 调用）
+    *   [x] **完善降级策略**：外部 API 不可用时跳过；LLM 超时或 JSON 格式错误时降级为时序预测；冷启动（新菜品/新店无历史数据）逐级降级：同类菜品均值 → 新品初始库存 → 日常库存 → 绝对兜底
+    *   [x] 实现触发机制：定时任务（Cron 每日 02:00 触发）与管理员手动触发
+    *   [x] 暴露 `/ai/predict/trigger`、`/ai/predict/result`、`/ai/predict/confirm` 三个接口，支持管理员人工干预与覆盖预测量
+*   [x] **Step 5: Java 端代理接口集成**
     *   **提醒**：将 `dish_tools.py` 中三步工具函数（`search_dish_by_preference` 除外，它走 Milvus RAG）的 pymysql 直连替换为调用 Java 代理接口，统一数据层归属。
-    *   Java 端新增菜品查询代理接口：供 Python `check_dish_inventory` 和 `get_dish_ingredients` 调用。
-    *   实现 B 端备菜预测代理接口：`/api/admin/predict/trigger`、`/api/admin/predict/result`、`/api/admin/predict/confirm`。
-    *   实现 B 端知识库上传代理接口：`/api/admin/knowledge/upload`。
-    *   Java 端通过 RestTemplate 调用 Python 接口。
+    *   [x] Java 端新增菜品查询代理接口：供 Python `check_dish_inventory` 和 `get_dish_ingredients` 调用。
+    *   [x] 实现 B 端备菜预测代理接口：`/api/admin/predict/trigger`、`/api/admin/predict/result`、`/api/admin/predict/confirm`。
+    *   [x] 实现 B 端知识库上传代理接口：`/api/admin/knowledge/upload`。
+    *   [x] Java 端通过 RestTemplate 调用 Python 接口。
 
 ---
 

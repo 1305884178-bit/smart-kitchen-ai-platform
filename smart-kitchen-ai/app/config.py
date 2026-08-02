@@ -26,6 +26,11 @@ class Settings:
     embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://api.openai.com/v1")
     embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
+    weather_api_key = os.getenv("WEATHER_API_KEY", "")
+    weather_city = os.getenv("WEATHER_CITY", "Shenzhen")
+
+    java_api_url = os.getenv("JAVA_API_URL", "http://localhost:8080")
+
     app_port = int(os.getenv("APP_PORT", "8000"))
 
 settings = Settings()
