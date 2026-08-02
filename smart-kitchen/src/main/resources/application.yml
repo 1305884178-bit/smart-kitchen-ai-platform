@@ -60,3 +60,6 @@ smart-kitchen:
     expiration: 86400000 # 24 hours
   python-service:
     url: ${PYTHON_API_URL:http://localhost:8000}
+  wechat:
+    app-id: ${WX_APP_ID:}
+    app-secret: ${WX_APP_SECRET:}

@@ -201,7 +201,7 @@ ORDERED(0)
 > 标注 `[DONE]` 为已实现，未标注为待实现。
 > 所有接口前缀 `/api/**` 需 JWT 鉴权（Header: `Authorization: Bearer <token>`），放行路径见 7.1 标注。
 
-### 7.1 用户认证
+### 7.1 用户认证 `[DONE]`
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
 |------|------|------|------|------|:--:|
@@ -227,34 +227,37 @@ ORDERED(0)
 
 ### 7.4 菜品浏览
 
+> 顾客端查看菜品列表与详情。
+
 | 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
 |------|------|------|------|------|:--:|
-| GET | /api/dish/list | Query: `?categoryId`（可选） | `[{ id, name, categoryId, categoryName, price, image, status, dailyStock, ingredients }]` | 按分类查询起售菜品 | CUSTOMER |
+| GET | /api/dish/list | Query: `?categoryId`（可选） | `[{ id, name, categoryId, categoryName, price, image, status, dailyStock, ingredients }]` | 按分类查询起售菜品 `[DONE]` | CUSTOMER |
+| GET | /api/dish/detail/{id} | Path: id | `{ id, name, categoryId, categoryName, price, image, status, dailyStock, ingredients, reviews: [{ score, comment, createTime }] }` | 菜品详情（含已有评价），供小程序菜品详情页使用 | CUSTOMER |
 
 ### 7.5 顾客端订单
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
 |------|------|------|------|------|:--:|
-| POST | /api/order/submit | `{ seatNumber, items: [{ dishId, quantity, remark }] }` | `{ orderId, orderNo, status:0 }` | 下单（Redis+Lua原子预扣库存） | CUSTOMER |
+| POST | /api/order/submit | `{ seatNumber, items: [{ dishId, quantity, remark }] }` | `{ orderId, orderNo, status:0 }` | 下单（Redis+Lua原子预扣库存） `[DONE]` | CUSTOMER |
 | POST | /api/order/{id}/add-dish | `{ items: [{ dishId, quantity }] }` | `{ orderId, addedDetails }` | 加菜（SERVED→ORDERED回退） | CUSTOMER |
-| POST | /api/order/{id}/pay | — | `{ orderId, status:20 }` | 确认结账（Mock支付，生成UUID流水号） | CUSTOMER |
+| POST | /api/order/{id}/pay | — | `{ orderId, status:20 }` | 确认结账（Mock支付，生成UUID流水号） `[DONE]` | CUSTOMER |
 | GET | /api/order/my-list | Query: `?page&size` | `{ total, records: [{ orderId, orderNo, seatNumber, totalAmount, status, createTime }] }` | 我的历史订单 | CUSTOMER |
-| GET | /api/order/my-detail/{id} | Path: id | `{ id, orderNo, seatNumber, totalAmount, status, availableActions, details, createTime }` | 订单详情含可用按钮 | CUSTOMER |
+| GET | /api/order/my-detail/{id} | Path: id | `{ id, orderNo, seatNumber, totalAmount, status, availableActions, details, createTime }` | 订单详情含可用按钮（availableActions 根据当前状态返回：ADD_DISH/PAY/REVIEW） | CUSTOMER |
 
 ### 7.6 管理端订单
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
 |------|------|------|------|------|:--:|
 | GET | /api/order/admin-list | Query: `?status&seatNumber&page&size` | `{ total, records: [{ id, orderNo, seatNumber, dishSummary, totalAmount, status, createTime }] }` | 全部订单（支持筛选） | ADMIN |
-| POST | /api/order/{id}/cancel | `{ cancelReason }` | `{ orderId, status:90 }` | 撤销订单（乐观锁+库存回滚） | ADMIN |
-| POST | /api/order/{id}/complete | — | `{ orderId, status:10 }` | 厨房完成出餐 | ADMIN |
+| POST | /api/order/{id}/cancel | `{ cancelReason }` | `{ orderId, status:90 }` | 撤销订单（乐观锁+库存回滚） `[DONE]` | ADMIN |
+| POST | /api/order/{id}/complete | — | `{ orderId, status:10 }` | 厨房完成出餐（由 KitchenBoardController 中的 `/serve` 统一实现） | ADMIN |
 
-### 7.7 厨房看板
+### 7.7 厨房看板 `[DONE]`
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
 |------|------|------|------|------|:--:|
 | GET | /api/kitchen-board/orders | — | `[{ orderId, seatNumber, dishList: [{ dishName, quantity, remark }], createTime }]` | ORDERED订单HTTP快照（断线重连用） | ADMIN |
-| — | WebSocket /ws/kitchen-board | — | `{ event_type, order_id, seat_number, dish_list, create_time }` | 实时推送 | 建立连接时传token |
+| — | WebSocket /ws/kitchen-board | — | `{ event_type, order_id, seat_number, dish_list, create_time }` | 实时推送，握手阶段通过 `?token=xxx` 参数鉴权 | 连接时传token |
 
 **WebSocket 事件模型**：
 ```json
@@ -270,42 +273,57 @@ ORDERED(0)
 }
 ```
 
-### 7.8 菜品管理
+### 7.8 菜品管理 `[DONE]`
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
 |------|------|------|------|------|:--:|
-| POST | /api/admin/dish/create | `{ name, categoryId, price, image, dailyStock, alertThreshold, ingredients }` | `{ dishId }` | 新增菜品 | ADMIN |
+| POST | /api/admin/dish/create | `{ name, categoryId, price, image, dailyStock, alertThreshold, ingredients }` | `{ dishId }` | 新增菜品（image 为 OSS URL） | ADMIN |
 | PUT | /api/admin/dish/update/{id} | Path: id + 同create（部分可选） | — | 更新菜品 | ADMIN |
 | DELETE | /api/admin/dish/delete/{id} | Path: id | — | 删除菜品 | ADMIN |
 | GET | /api/admin/dish/detail/{id} | Path: id | `{ id, name, categoryId, price, image, status, dailyStock, alertThreshold, ingredients }` | 菜品详情 | ADMIN |
+| GET | /api/admin/upload/sts-token | — | `{ accessKeyId, accessKeySecret, securityToken, expiration, bucket, region, endpoint }` | 阿里云 OSS STS 临时凭证（15min过期），前端凭此直传图片到 OSS | ADMIN |
 
-### 7.9 库存管理
+> **图片上传流程**：前端调 STS Token 接口获取临时凭证 → el-upload 直传 OSS → 即时回显 → 提交菜品时将 OSS URL 作为 `image` 字段存入 `pms_dish.image`。C 端通过该 URL 读取展示菜品图片。
+
+### 7.9 库存管理 `[DONE]`
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
 |------|------|------|------|------|:--:|
-| GET | /api/admin/stock/view/{dishId} | Path: dishId | `{ dishId, dishName, dailyStock, alertThreshold, logs: [...] }` | 库存及变更流水 | ADMIN |
+| GET | /api/admin/stock/view/{dishId} | Path: dishId | `{ dishId, dishName, dailyStock, alertThreshold, logs: [{ changeType, changeQty, beforeQty, afterQty, orderNo, createTime }] }` | 库存及变更流水（需增强返回结构，补充 dishName/dailyStock/alertThreshold） | ADMIN |
 | PUT | /api/admin/stock/update/{dishId} | Path: dishId + `{ changeQty, changeType }` | `{ dishId, beforeQty, afterQty }` | 手动调整库存 | ADMIN |
 
-### 7.10 餐后评价
+### 7.10 管理端评价列表
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
 |------|------|------|------|------|:--:|
-| POST | /api/review/submit | `{ orderId, score, comment }` | `{ reviewId }` | PAID状态订单可评价（一单一评） | CUSTOMER |
+| GET | /api/admin/review/list | Query: `?score`（可选筛选） | `[{ id, orderId, orderNo, userId, score, comment, createTime }]` | 管理端评价列表，支持按评分筛选 | ADMIN |
 
-### 7.11 AI知识库
+### 7.11 顾客端餐后评价
+
+| 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
+|------|------|------|------|------|:--:|
+| POST | /api/review/submit | `{ orderId, score, comment }` | `{ reviewId }` | PAID状态订单可评价（一单一评） `[DONE]` | CUSTOMER |
+
+### 7.12 管理端仪表盘
+
+| 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
+|------|------|------|------|------|:--:|
+| GET | /api/admin/dashboard/stats | — | `{ todayOrderCount, todayRevenue, pendingServeCount, lowStockDishCount }` | 仪表盘首页统计卡片数据 | ADMIN |
+
+### 7.13 AI知识库 `[DONE]`
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 | 鉴权 |
 |------|------|------|------|------|:--:|
 | POST | /api/admin/knowledge/upload | Multipart: file | `{ documentId, fileName, chunkCount }` | 上传文档 → Java调Python `/ai/knowledge/process` 向量化 → 存入Milvus | ADMIN |
 
-### 7.12 Python 端—AI智能客服
+### 7.14 Python 端—AI智能客服
 
 | 方法 | 路径 | 入参 | 出参 | 说明 |
 |------|------|------|------|------|
 | POST | /ai/chat | `{ userId, question, conversationHistory }` | SSE流: `event: message
 data: { answer, sources }` | 单Agent + Function Calling，调用RAG检索菜品知识，流式返回答案 |
 
-### 7.13 Python 端—AI备菜预测（LangGraph）
+### 7.15 Python 端—AI备菜预测（LangGraph）
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 |
 |------|------|------|------|------|
@@ -313,7 +331,7 @@ data: { answer, sources }` | 单Agent + Function Calling，调用RAG检索菜品
 | GET | /ai/predict/result | Query: `?date=2026-07-18` | `[{ dishId, dishName, baseQuantity, aiSuggestQuantity, finalQuantity, reasoning, confidence, recentAvgScore, status }]` | 查询指定日期预测结果；confidence<0.4标记低置信度 |
 | PUT | /ai/predict/confirm | `{ predictDate, dishId, finalQuantity, confirmedBy }` | `{ status: "confirmed" }` | 管理员确认/覆盖预测数量 |
 
-### 7.14 Python 端—AI知识库处理
+### 7.16 Python 端—AI知识库处理
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 |
 |------|------|------|------|------|
