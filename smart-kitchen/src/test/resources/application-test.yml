@@ -10,3 +10,17 @@ spring:
       encoding: UTF-8
       schema-locations: classpath:schema-h2.sql
       data-locations: classpath:data-h2.sql
+
+smart-kitchen:
+  jwt:
+    secret: test-secret-key-must-be-at-least-32-bytes-long
+    expiration: 86400000
+  python-service:
+    url: http://localhost:8000
+  oss:
+    endpoint: oss-cn-hangzhou.aliyuncs.com
+    access-key-id: ""
+    access-key-secret: ""
+    role-arn: ""
+    bucket: ""
+    region: cn-hangzhou

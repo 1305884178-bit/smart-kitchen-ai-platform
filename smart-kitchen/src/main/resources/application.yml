@@ -63,3 +63,10 @@ smart-kitchen:
   wechat:
     app-id: ${WX_APP_ID:}
     app-secret: ${WX_APP_SECRET:}
+  oss:
+    endpoint: ${OSS_ENDPOINT:oss-cn-hangzhou.aliyuncs.com}
+    access-key-id: ${OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+    role-arn: ${OSS_ROLE_ARN:}
+    bucket: ${OSS_BUCKET:}
+    region: ${OSS_REGION:cn-hangzhou}

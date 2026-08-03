@@ -1,6 +1,9 @@
 package com.smartkitchen.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.smartkitchen.dto.AddDishDTO;
+import com.smartkitchen.dto.OrderDetailVO;
 import com.smartkitchen.dto.OrderSubmitDTO;
 import com.smartkitchen.dto.OrderVO;
 import com.smartkitchen.entity.Order;
@@ -28,6 +31,7 @@ public interface OrderService extends IService<Order> {
      * @param orderId 订单ID
      */
     void cancelOrder(Long orderId);
+
     /**
      * 获取所有状态为待出餐（ORDERED）的订单及其明细
      * @return 订单视图对象列表
@@ -39,4 +43,38 @@ public interface OrderService extends IService<Order> {
      * @param orderId 订单ID
      */
     void serveOrder(Long orderId);
+
+    /**
+     * 加菜：扣库存 + 追加明细 + SERVED→ORDERED状态回退
+     * @param orderId 订单ID
+     * @param addDishDTO 加菜菜品列表
+     */
+    void addDish(Long orderId, AddDishDTO addDishDTO);
+
+    /**
+     * 顾客历史订单分页查询
+     * @param userId 用户ID
+     * @param page 页码
+     * @param size 每页大小
+     * @return 分页订单列表
+     */
+    Page<OrderVO> listUserOrders(Long userId, Integer page, Integer size);
+
+    /**
+     * 顾客订单详情（含availableActions）
+     * @param orderId 订单ID
+     * @param userId 用户ID
+     * @return 订单详情
+     */
+    OrderDetailVO getUserOrderDetail(Long orderId, Long userId);
+
+    /**
+     * 管理端全量订单分页查询
+     * @param page 页码
+     * @param size 每页大小
+     * @param status 订单状态（可选）
+     * @param seatNumber 座位号（可选）
+     * @return 分页订单列表
+     */
+    Page<OrderVO> listAdminOrders(Integer page, Integer size, Integer status, String seatNumber);
 }

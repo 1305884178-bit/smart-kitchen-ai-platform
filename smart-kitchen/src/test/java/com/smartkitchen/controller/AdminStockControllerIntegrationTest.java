@@ -4,8 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartkitchen.common.Result;
 import com.smartkitchen.config.JwtUtil;
+import com.smartkitchen.dto.StockVO;
 import com.smartkitchen.entity.Dish;
-import com.smartkitchen.entity.StockLog;
 import com.smartkitchen.service.DishService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,7 +18,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -71,17 +70,21 @@ public class AdminStockControllerIntegrationTest {
         Result<Object> updateResult = objectMapper.readValue(updateResponse, new TypeReference<Result<Object>>() {});
         assertEquals(200, updateResult.getCode());
 
-        // 2. View stock logs
+        // 2. View stock logs (now returns StockVO instead of List<StockLog>)
         String viewResponse = mockMvc.perform(get("/api/admin/stock/view/" + testDishId)
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        Result<List<StockLog>> viewResult = objectMapper.readValue(viewResponse, new TypeReference<Result<List<StockLog>>>() {});
+        Result<StockVO> viewResult = objectMapper.readValue(viewResponse, new TypeReference<Result<StockVO>>() {});
         assertEquals(200, viewResult.getCode());
         assertNotNull(viewResult.getData());
-        assertEquals(1, viewResult.getData().size());
-        assertEquals(10, viewResult.getData().get(0).getChangeQty());
+        assertEquals(testDishId, viewResult.getData().getDishId());
+        assertEquals("Stock Test Dish", viewResult.getData().getDishName());
+        assertEquals(60, viewResult.getData().getDailyStock());
+        assertNotNull(viewResult.getData().getLogs());
+        assertEquals(1, viewResult.getData().getLogs().size());
+        assertEquals(10, viewResult.getData().getLogs().get(0).getChangeQty());
     }
 }

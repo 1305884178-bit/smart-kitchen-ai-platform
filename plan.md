@@ -90,20 +90,20 @@
 **目标**：B端 PC Web + C端微信小程序，打通全部后端接口实现可视化交互。
 
 **B端技术栈**：Vue 3 + Element Plus + Axios + Pinia + Vue Router
-**C端技术栈**：微信小程序原生框架（WXML/WXSS/JS）或 uni-app
+**C端技术栈**：微信小程序原生框架（WXML/WXSS/JS）
 
 > **注意**：在启动前端开发前，必须先完成 Step 0 后端 API 补齐，否则部分页面会因接口返回 null 而阻塞。
 
 ### Step 0: 后端 API 补齐（前端前置依赖）
-*   [ ] `/api/order/{id}/add-dish` — 加菜逻辑：扣库存 + 追加明细 + SERVED→ORDERED 状态回退
-*   [ ] `/api/order/my-list` — 顾客历史订单分页查询（支持 page/size）
-*   [ ] `/api/order/my-detail/{id}` — 订单详情，含 availableActions（ADD_DISH/PAY/REVIEW）字段
-*   [ ] `/api/order/admin-list` — 管理端全量订单分页 + 按 status/seatNumber 筛选
-*   [ ] `/api/order/{id}/complete` — 厨房出餐完成（从 ORDERED→SERVED），需与 KitchenBoardController 中的 `/serve` 统一，避免重复路由
-*   [ ] `/api/admin/stock/view/{dishId}` — 返回结构增强：补充 dishName、dailyStock、alertThreshold，与流水列表一并返回
-*   [ ] `/api/admin/review/list` — 补充按评分（score）筛选参数
-*   [ ] `/api/admin/dashboard/stats` — **新增**：今日订单数、今日营收、待出餐数量、库存预警菜品数（供仪表盘首页使用）
-*   [ ] `/api/admin/upload/sts-token` — **新增**：阿里云 OSS STS 临时凭证签发，供前端直传图片（AccessKey 不泄露到前端）
+*   [x] `/api/order/{id}/add-dish` — 加菜逻辑：扣库存 + 追加明细 + SERVED→ORDERED 状态回退
+*   [x] `/api/order/my-list` — 顾客历史订单分页查询（支持 page/size）
+*   [x] `/api/order/my-detail/{id}` — 订单详情，含 availableActions（ADD_DISH/PAY/REVIEW）字段
+*   [x] `/api/order/admin-list` — 管理端全量订单分页 + 按 status/seatNumber 筛选
+*   [x] `/api/order/{id}/complete` — 厨房出餐完成（从 ORDERED→SERVED），复用 OrderService.serveOrder()
+*   [x] `/api/admin/stock/view/{dishId}` — 返回结构增强：补充 dishName、dailyStock、alertThreshold，与流水列表一并返回
+*   [x] `/api/admin/review/list` — 补充按评分（score）筛选参数
+*   [x] `/api/admin/dashboard/stats` — **新增**：今日订单数、今日营收、待出餐数量、库存预警菜品数（供仪表盘首页使用）
+*   [x] `/api/admin/upload/sts-token` — **新增**：阿里云 OSS STS 临时凭证签发，供前端直传图片（AccessKey 不泄露到前端）
 
 ### Step 1: B端基础设施搭建（PC Web，Vue 3）
 *   [ ] **项目脚手架**：Vue 3 工程初始化（如 `npm create vite@latest admin-web -- --template vue`）。
