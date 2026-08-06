@@ -11,6 +11,12 @@ import java.util.List;
 public interface ReviewService extends IService<Review> {
 
     /**
+     * 提交餐后评价（含订单状态校验）
+     * @param review 评价实体（不含userId和createTime）
+     */
+    void submitReview(Review review);
+
+    /**
      * 按评分筛选评价列表（score为null时返回全部）
      * @param score 评分（可选，1-5）
      * @return 评价列表

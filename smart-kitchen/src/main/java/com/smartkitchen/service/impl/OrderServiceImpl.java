@@ -2,6 +2,7 @@ package com.smartkitchen.service.impl;
 
 import com.smartkitchen.config.KitchenBoardWebSocketHandler;
 import com.smartkitchen.config.CustomerWebSocketHandler;
+import com.smartkitchen.config.UserContext;
 import com.smartkitchen.dto.AddDishDTO;
 import com.smartkitchen.dto.OrderDetailVO;
 import com.smartkitchen.dto.OrderVO;
@@ -72,7 +73,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public String submitOrder(OrderSubmitDTO submitDTO, Long userId) {
+    public String submitOrder(OrderSubmitDTO submitDTO) {
+        Long userId = UserContext.getUserId();
         List<String> keys = new ArrayList<>();
         List<String> args = new ArrayList<>();
 
@@ -330,7 +332,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     }
 
     @Override
-    public Page<OrderVO> listUserOrders(Long userId, Integer page, Integer size) {
+    public Page<OrderVO> listUserOrders(Integer page, Integer size) {
+        Long userId = UserContext.getUserId();
         Page<Order> orderPage = new Page<>(page, size);
         this.lambdaQuery()
                 .eq(Order::getUserId, userId)
@@ -362,7 +365,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     }
 
     @Override
-    public OrderDetailVO getUserOrderDetail(Long orderId, Long userId) {
+    public OrderDetailVO getUserOrderDetail(Long orderId) {
+        Long userId = UserContext.getUserId();
         Order order = this.lambdaQuery()
                 .eq(Order::getId, orderId)
                 .eq(Order::getUserId, userId)

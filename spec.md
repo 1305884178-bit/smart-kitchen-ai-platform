@@ -397,7 +397,7 @@ Supervisor Graph
 
 1. JWT Payload 包含 `userId` 和 `role`。
 2. `JwtInterceptor` 拦截所有 `/api/**` 请求，从 `Authorization: Bearer <token>` 中解析。
-3. 解析成功后将 `userId` 写入 `request.setAttribute("userId")`，Controller 通过该值获取当前用户。
+3. 解析成功后将 `userId` 和 `role` 存入 `UserContext`（基于 ThreadLocal），Controller 和 Service 通过 `UserContext.getUserId()` 直接获取当前用户，无需层层传参。请求结束后由 `JwtInterceptor.afterCompletion()` 清理 ThreadLocal，防止内存泄漏。
 4. 放行路径：`/api/auth/**`、`/api/seat/**`。
 5. Token 过期时间由 `application.yml` 中的 `jwt.expiration` 配置（默认 7200 秒）。
 

@@ -28,8 +28,8 @@ public class JwtInterceptor implements HandlerInterceptor {
                 Long userId = claims.get("userId", Long.class);
                 String role = claims.get("role", String.class);
                 
-                request.setAttribute("userId", userId);
-                request.setAttribute("role", role);
+                UserContext.setUserId(userId);
+                UserContext.setRole(role);
                 return true;
             }
         }
@@ -39,5 +39,11 @@ public class JwtInterceptor implements HandlerInterceptor {
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write("{\"code\":401,\"message\":\"未登录或Token已过期\"}");
         return false;
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+        // 请求结束后清理 ThreadLocal，防止内存泄漏
+        UserContext.clear();
     }
 }

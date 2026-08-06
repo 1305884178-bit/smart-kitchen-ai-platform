@@ -7,7 +7,6 @@ import com.smartkitchen.dto.OrderDetailVO;
 import com.smartkitchen.dto.OrderSubmitDTO;
 import com.smartkitchen.dto.OrderVO;
 import com.smartkitchen.service.OrderService;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,9 +25,8 @@ public class OrderController {
      * @return 返回订单创建结果
      */
     @PostMapping("/submit")
-    public Result<String> submitOrder(@RequestBody OrderSubmitDTO submitDTO, HttpServletRequest request) {
-        Long userId = (Long) request.getAttribute("userId");
-        String orderNo = orderService.submitOrder(submitDTO, userId);
+    public Result<String> submitOrder(@RequestBody OrderSubmitDTO submitDTO) {
+        String orderNo = orderService.submitOrder(submitDTO);
         return Result.success(orderNo);
     }
 
@@ -63,10 +61,8 @@ public class OrderController {
      */
     @GetMapping("/my-list")
     public Result<Page<OrderVO>> myList(@RequestParam(defaultValue = "1") Integer page,
-                                         @RequestParam(defaultValue = "10") Integer size,
-                                         HttpServletRequest request) {
-        Long userId = (Long) request.getAttribute("userId");
-        Page<OrderVO> result = orderService.listUserOrders(userId, page, size);
+                                         @RequestParam(defaultValue = "10") Integer size) {
+        Page<OrderVO> result = orderService.listUserOrders(page, size);
         return Result.success(result);
     }
 
@@ -76,9 +72,8 @@ public class OrderController {
      * @return 返回订单详细信息
      */
     @GetMapping("/my-detail/{id}")
-    public Result<OrderDetailVO> myDetail(@PathVariable("id") Long id, HttpServletRequest request) {
-        Long userId = (Long) request.getAttribute("userId");
-        OrderDetailVO vo = orderService.getUserOrderDetail(id, userId);
+    public Result<OrderDetailVO> myDetail(@PathVariable("id") Long id) {
+        OrderDetailVO vo = orderService.getUserOrderDetail(id);
         return Result.success(vo);
     }
 

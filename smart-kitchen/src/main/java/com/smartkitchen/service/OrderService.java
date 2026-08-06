@@ -15,10 +15,9 @@ public interface OrderService extends IService<Order> {
     /**
      * 提交订单
      * @param submitDTO 提交参数
-     * @param userId 当前用户ID
      * @return 订单号
      */
-    String submitOrder(OrderSubmitDTO submitDTO, Long userId);
+    String submitOrder(OrderSubmitDTO submitDTO);
 
     /**
      * 确认结账
@@ -53,20 +52,18 @@ public interface OrderService extends IService<Order> {
 
     /**
      * 顾客历史订单分页查询
-     * @param userId 用户ID
      * @param page 页码
      * @param size 每页大小
      * @return 分页订单列表
      */
-    Page<OrderVO> listUserOrders(Long userId, Integer page, Integer size);
+    Page<OrderVO> listUserOrders(Integer page, Integer size);
 
     /**
      * 顾客订单详情（含availableActions）
      * @param orderId 订单ID
-     * @param userId 用户ID
      * @return 订单详情
      */
-    OrderDetailVO getUserOrderDetail(Long orderId, Long userId);
+    OrderDetailVO getUserOrderDetail(Long orderId);
 
     /**
      * 管理端全量订单分页查询

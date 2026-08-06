@@ -106,12 +106,12 @@
 *   [x] `/api/admin/upload/sts-token` — **新增**：阿里云 OSS STS 临时凭证签发，供前端直传图片（AccessKey 不泄露到前端）
 
 ### Step 1: B端基础设施搭建（PC Web，Vue 3）
-*   [ ] **项目脚手架**：Vue 3 工程初始化（如 `npm create vite@latest admin-web -- --template vue`）。
-*   [ ] **Axios 封装**：请求拦截器（自动注入 `Authorization: Bearer <token>`）+ 响应拦截器（401→清除token→跳转登录，统一错误提示）。
-*   [ ] **devServer 代理配置**：`vite.config.ts` 中配置 proxy，开发环境代理 `/api` 和 `/ws` 到后端。
-*   [ ] **环境变量**：`.env.development` / `.env.production` 配置 `VITE_API_BASE_URL`、`VITE_WS_URL`。
-*   [ ] **Vue Router 路由与权限守卫**：`router.beforeEach` 校验登录态，仅 ADMIN 角色可访问，无 token 跳转登录页。
-*   [ ] **WebSocket 客户端封装**：心跳保活 + 断线自动重连 + 重连后回调 HTTP 快照补齐。连接时 URL 携带 `?token=xxx` 参数，后端握手阶段校验（复用 JwtInterceptor 逻辑）。
+*   [x] **项目脚手架**：Vue 3 工程初始化（`npm create vite@latest admin-web -- --template vue`）。
+*   [x] **Axios 封装**：请求拦截器（自动注入 `Authorization: Bearer <token>`）+ 响应拦截器（401→清除token→跳转登录，统一错误提示）。
+*   [x] **devServer 代理配置**：`vite.config.ts` 中配置 proxy，开发环境代理 `/api` 和 `/ws` 到后端。
+*   [x] **环境变量**：`.env.development` / `.env.production` 配置 `VITE_API_BASE_URL`、`VITE_WS_URL`。
+*   [x] **Vue Router 路由与权限守卫**：`router.beforeEach` 校验登录态，仅 ADMIN 角色可访问，无 token 跳转登录页。
+*   [x] **WebSocket 客户端封装**：心跳保活 + 断线自动重连 + 重连后回调 HTTP 快照补齐。连接时 URL 携带 `?token=xxx` 参数，后端握手阶段校验（复用 JwtInterceptor 逻辑）。
 
 ### Step 2: B端管理后台页面（PC Web）
 *   [ ] **全局布局**：左侧可折叠侧边栏菜单 + 顶部面包屑导航 + 右侧主内容区，根据路由自动展开高亮。
