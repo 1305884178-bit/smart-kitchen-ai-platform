@@ -1,11 +1,13 @@
 <template>
   <el-container class="layout-container">
-    <el-aside width="220px" class="layout-aside">
+    <el-aside :width="isCollapse ? '64px' : '220px'" class="layout-aside">
       <div class="logo">
-        <h2>智慧后厨</h2>
+        <h2 v-show="!isCollapse">智慧后厨</h2>
+        <h2 v-show="isCollapse" style="font-size:14px">后厨</h2>
       </div>
       <el-menu
         :default-active="activeMenu"
+        :collapse="isCollapse"
         router
         background-color="#304156"
         text-color="#bfcbd9"
@@ -48,6 +50,10 @@
     <el-container>
       <el-header class="layout-header">
         <div class="header-left">
+          <el-icon class="collapse-btn" @click="isCollapse = !isCollapse" style="cursor:pointer;font-size:20px;margin-right:16px">
+            <Expand v-if="isCollapse" />
+            <Fold v-else />
+          </el-icon>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
             <el-breadcrumb-item v-if="currentTitle">{{ currentTitle }}</el-breadcrumb-item>
@@ -75,7 +81,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessageBox } from 'element-plus'
@@ -84,6 +90,7 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
+const isCollapse = ref(false)
 const activeMenu = computed(() => route.path)
 const currentTitle = computed(() => route.meta.title || '')
 
@@ -109,6 +116,7 @@ function handleCommand(command) {
 .layout-aside {
   background-color: #304156;
   overflow-y: auto;
+  transition: width 0.3s;
 }
 
 .logo {
@@ -122,6 +130,15 @@ function handleCommand(command) {
 .logo h2 {
   color: #fff;
   font-size: 18px;
+  white-space: nowrap;
+}
+
+.collapse-btn {
+  color: #606266;
+  transition: color 0.2s;
+}
+.collapse-btn:hover {
+  color: #409EFF;
 }
 
 .layout-header {

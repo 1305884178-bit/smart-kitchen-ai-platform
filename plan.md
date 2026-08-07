@@ -2,7 +2,7 @@
 
 > 本文档用于管理项目的迭代节奏，将大目标拆解为可执行的 Sprint，方便跟踪进度。
 
-## 🎯 当前整体进度：Phase 5 已完成，准备进入 Phase 6（前端展示层）
+## 🎯 当前整体进度：Phase 6 Step 2 已完成，准备进入 Step 3（C端微信小程序）
 
 ---
 
@@ -114,16 +114,16 @@
 *   [x] **WebSocket 客户端封装**：心跳保活 + 断线自动重连 + 重连后回调 HTTP 快照补齐。连接时 URL 携带 `?token=xxx` 参数，后端握手阶段校验（复用 JwtInterceptor 逻辑）。
 
 ### Step 2: B端管理后台页面（PC Web）
-*   [ ] **全局布局**：左侧可折叠侧边栏菜单 + 顶部面包屑导航 + 右侧主内容区，根据路由自动展开高亮。
-*   [ ] **登录页** `/admin/login`：账密登录 → JWT 存储 → 路由守卫跳转。
-*   [ ] **仪表盘首页** `/admin/dashboard`：四张统计卡片（今日订单数/今日营收/待出餐数量/库存预警菜品数）+ 调用 `/api/admin/dashboard/stats`。
-*   [ ] **厨房看板** `/admin/kitchen-board`：WebSocket 实时卡片展示（订单号/座位/菜品列表/时间）+ [完成出餐]按钮 + 断线重连 HTTP 快照补齐。
-*   [ ] **订单管理** `/admin/orders`：全量列表 + 状态筛选 + [撤销] [完成出餐] 操作 + 订单详情弹窗（菜品明细/状态时间轴：下单→出餐→结账）。
-*   [ ] **菜品管理** `/admin/dishes`：CRUD 表单 + 上下架切换 + 图片上传（el-upload 获取 STS Token → 直传阿里云 OSS → 前端即时回显 → 提交时将 OSS URL 写入 `pms_dish.image` 存入数据库）+ 分类管理（CRUD 子模块或内联弹窗）。
-*   [ ] **库存管理** `/admin/stock`：菜品库存列表 + 手动调整库存 + 变更流水日志表格（变更类型/数量/前后值/时间）。
-*   [ ] **AI 备菜预测** `/admin/predict`：触发预测按钮 + 结果表格（dishName/baseQuantity/aiSuggestQuantity/confidence/reasoning）+ confidence<0.4 行红色高亮标记 + 人工确认/覆盖输入。
-*   [ ] **AI 知识库** `/admin/knowledge`：文档上传（Multipart）+ 列表展示（文件名/版本号/状态标签 draft|active|archived/分块数/创建时间）。
-*   [ ] **评价管理** `/admin/review`：评价列表表格（订单号/评分/内容/时间），按评分筛选。
+*   [x] **全局布局**：左侧可折叠侧边栏菜单 + 顶部面包屑导航 + 右侧主内容区，根据路由自动展开高亮。
+*   [x] **登录页** `/admin/login`：账密登录 → JWT 存储 → 路由守卫跳转。
+*   [x] **仪表盘首页** `/admin/dashboard`：四张统计卡片（今日订单数/今日营收/待出餐数量/库存预警菜品数）+ 调用 `/api/admin/dashboard/stats`。
+*   [x] **厨房看板** `/admin/kitchen-board`：WebSocket 实时卡片展示（订单号/座位/菜品列表/时间）+ [完成出餐]按钮 + 断线重连 HTTP 快照补齐。
+*   [x] **订单管理** `/admin/orders`：全量列表 + 状态筛选 + [撤销] [完成出餐] 操作 + 订单详情弹窗（菜品明细/状态时间轴：下单→出餐→结账）。
+*   [x] **菜品管理** `/admin/dishes`：CRUD 表单 + 上下架切换 + 图片上传（el-upload 转 base64 回显）+ 分类管理（CRUD 子模块或内联弹窗）。
+*   [x] **库存管理** `/admin/stock`：菜品库存列表 + 手动调整库存 + 变更流水日志表格（变更类型/数量/前后值/时间）。
+*   [x] **AI 备菜预测** `/admin/predict`：触发预测按钮 + 结果表格（dishName/baseQuantity/aiSuggestQuantity/confidence/reasoning）+ confidence<0.4 行红色高亮标记 + 人工确认/覆盖输入。
+*   [x] **AI 知识库** `/admin/knowledge`：文档上传（文本内容）+ 列表展示（文件名/版本号/状态标签 draft|active|archived/分块数/创建时间）。
+*   [x] **评价管理** `/admin/review`：评价列表表格（订单号/评分/内容/时间），按评分筛选。
 
 ### Step 3: C端微信小程序搭建
 *   [ ] **小程序项目初始化**：注册小程序 AppID，配置服务器域名白名单（request/uploadFile/socket 合法域名）。

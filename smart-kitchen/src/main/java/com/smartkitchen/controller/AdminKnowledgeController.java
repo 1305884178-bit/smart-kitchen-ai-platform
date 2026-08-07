@@ -2,12 +2,13 @@ package com.smartkitchen.controller;
 
 import com.smartkitchen.common.Result;
 import com.smartkitchen.dto.KnowledgeUploadDTO;
+import com.smartkitchen.entity.KnowledgeDocument;
+import com.smartkitchen.service.KnowledgeDocumentService;
 import com.smartkitchen.service.PythonAIService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 /**
  * 管理端知识库控制器
@@ -18,6 +19,18 @@ public class AdminKnowledgeController {
 
     @Autowired
     private PythonAIService pythonAIService;
+
+    @Autowired
+    private KnowledgeDocumentService knowledgeDocumentService;
+
+    /**
+     * 获取知识库文档列表
+     * @return 文档列表
+     */
+    @GetMapping("/list")
+    public Result<List<KnowledgeDocument>> listDocuments() {
+        return Result.success(knowledgeDocumentService.listDocuments());
+    }
 
     /**
      * 上传文档至知识库（代理调用Python /ai/knowledge/process）
