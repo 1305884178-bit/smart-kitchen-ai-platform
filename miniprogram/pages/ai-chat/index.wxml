@@ -1,2 +1,42 @@
 <!--pages/ai-chat/index.wxml-->
-<text>pages/ai-chat/index.wxml</text>
+<view class="chat-container">
+  <!-- 对话列表 -->
+  <scroll-view class="chat-list" scroll-y id="chatScroll" scroll-into-view="{{scrollToView}}">
+    <view
+      wx:for="{{messages}}"
+      wx:key="unique"
+      id="msg-{{index}}"
+      class="msg-item {{item.role === 'user' ? 'msg-left' : 'msg-right'}}"
+    >
+      <view class="msg-avatar {{item.role === 'user' ? 'avatar-user' : 'avatar-ai'}}">
+        {{item.role === 'user' ? '我' : 'AI'}}
+      </view>
+      <view class="msg-bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-ai'}}">
+        <text>{{item.content}}</text>
+      </view>
+    </view>
+    <!-- AI 正在输入提示 -->
+    <view wx:if="{{aiTyping}}" class="msg-item msg-right">
+      <view class="msg-avatar avatar-ai">AI</view>
+      <view class="msg-bubble bubble-ai typing-dots">
+        <text>...</text>
+      </view>
+    </view>
+  </scroll-view>
+
+  <!-- 输入区 -->
+  <view class="chat-input-bar safe-bottom">
+    <input
+      class="chat-input"
+      placeholder="输入问题..."
+      value="{{inputValue}}"
+      bindinput="onInput"
+      confirm-type="send"
+      bindconfirm="onSend"
+      disabled="{{sending}}"
+    />
+    <button class="send-btn {{sending || !inputValue ? 'btn-disabled' : ''}}" bindtap="onSend" disabled="{{sending || !inputValue}}">
+      发送
+    </button>
+  </view>
+</view>

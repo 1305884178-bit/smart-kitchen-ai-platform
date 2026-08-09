@@ -4,10 +4,8 @@
  */
 App({
   onLaunch() {
-    // 检查本地缓存的 token
     const token = wx.getStorageSync('token');
     if (token) {
-      // 校验 token 是否有效
       this._validateToken(token);
     }
   },
@@ -32,14 +30,13 @@ App({
         }
       },
       fail: () => {
-        // 网络异常时保留 token 等待重试
         this.globalData.isLoggedIn = true;
       }
     });
   },
 
   /**
-   * 清除登录态（token 过期或无效时调用）
+   * 清除登录态
    */
   _clearAuth() {
     wx.removeStorageSync('token');
@@ -49,7 +46,7 @@ App({
 
   /**
    * 执行微信登录流程
-   * @returns {Promise<string|null>} 成功返回 token，失败返回 null
+   * @returns {Promise<string|null>} 成功返回 token，新用户返回 null
    */
   doWxLogin() {
     return new Promise((resolve, reject) => {
@@ -83,6 +80,37 @@ App({
         },
         fail: (err) => reject(err)
       });
+    });
+  },
+
+  /**
+   * 全局登录校验：未登录则引导登录流程
+   * 每个需要登录的页面在 onShow 中调用此方法
+   * @returns {Promise<boolean>} true=已登录，false=未登录（已跳转）
+   */
+  checkLogin() {
+    return new Promise((resolve) => {
+      const token = wx.getStorageSync('token');
+      if (token && this.globalData.isLoggedIn) {
+        resolve(true);
+        return;
+      }
+      // 执行登录流程
+      this.doWxLogin()
+        .then((result) => {
+          if (result) {
+            // 老用户登录成功
+            resolve(true);
+          } else {
+            // 新用户，跳转注册页
+            wx.navigateTo({ url: '/pages/register/index' });
+            resolve(false);
+          }
+        })
+        .catch(() => {
+          wx.showToast({ title: '登录失败，请重试', icon: 'none' });
+          resolve(false);
+        });
     });
   },
 

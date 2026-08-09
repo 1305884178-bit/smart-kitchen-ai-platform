@@ -1,2 +1,43 @@
 <!--pages/order-detail/index.wxml-->
-<text>pages/order-detail/index.wxml</text>
+<view class="page-container">
+  <view wx:if="{{loading}}" class="loading-tip">加载中...</view>
+
+  <block wx:elif="{{order}}">
+    <!-- 订单信息 -->
+    <view class="card">
+      <view class="flex-between">
+        <text class="order-no">{{order.orderNo}}</text>
+        <text class="status-tag status-{{order.status}}">{{statusText}}</text>
+      </view>
+      <view class="order-info">
+        <text>座位: {{order.seatNumber}}</text>
+        <text>金额: ¥{{order.totalAmount}}</text>
+        <text>时间: {{_formatTime(order.createTime)}}</text>
+      </view>
+      <view wx:if="{{order.remark}}" class="remark-text">备注: {{order.remark}}</view>
+    </view>
+
+    <!-- 菜品明细 -->
+    <view class="card">
+      <view class="section-title">菜品明细</view>
+      <view class="order-item" wx:for="{{order.details}}" wx:key="id">
+        <text class="item-name">{{item.dishName}} x{{item.quantity}}</text>
+        <text class="item-price">¥{{item.price * item.quantity}}</text>
+        <text wx:if="{{item.isAdded}}" class="added-tag">加菜</text>
+      </view>
+    </view>
+
+    <!-- 操作按钮 -->
+    <view class="action-section" wx:if="{{actions.length > 0}}">
+      <button
+        wx:for="{{actions}}"
+        wx:key="*this"
+        class="action-btn action-{{item.type}}"
+        data-action="{{item.type}}"
+        bindtap="onAction"
+      >{{item.label}}</button>
+    </view>
+  </block>
+
+  <view wx:else class="empty-tip">订单不存在</view>
+</view>

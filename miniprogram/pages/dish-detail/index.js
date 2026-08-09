@@ -1,66 +1,69 @@
 // pages/dish-detail/index.js
+const request = require('../../utils/request');
+const cart = require('../../utils/cart');
+
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
+    dish: null,
+    loading: true
   },
 
-  /**
-   * 生命周期函数--监听页面加载
-   */
   onLoad(options) {
-
+    const dishId = options.id;
+    if (dishId) {
+      this._loadDishDetail(dishId);
+    }
   },
 
   /**
-   * 生命周期函数--监听页面初次渲染完成
+   * 加载菜品详情（使用管理端详情接口获取完整数据）
    */
-  onReady() {
-
+  _loadDishDetail(dishId) {
+    request.get(`/api/admin/dish/detail/${dishId}`)
+      .then(dish => {
+        this.setData({ dish, loading: false });
+      })
+      .catch(() => {
+        // 降级：从菜品列表中查找
+        request.get('/api/dish/list')
+          .then(dishes => {
+            const dish = dishes.find(d => d.id == dishId);
+            this.setData({ dish: dish || null, loading: false });
+          })
+          .catch(() => {
+            this.setData({ loading: false });
+            wx.showToast({ title: '加载失败', icon: 'none' });
+          });
+      });
   },
 
   /**
-   * 生命周期函数--监听页面显示
+   * 加入购物车
    */
-  onShow() {
-
+  onAddToCart() {
+    const { dish } = this.data;
+    if (!dish || dish.dailyStock <= 0) {
+      wx.showToast({ title: '该菜品已售罄', icon: 'none' });
+      return;
+    }
+    cart.addToCart({
+      dishId: dish.id,
+      dishName: dish.name,
+      price: dish.price,
+      image: dish.image
+    });
+    wx.showToast({ title: '已加入购物车', icon: 'success' });
   },
 
   /**
-   * 生命周期函数--监听页面隐藏
+   * 解析配料/过敏原（ingredients 字段为JSON字符串）
    */
-  onHide() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面卸载
-   */
-  onUnload() {
-
-  },
-
-  /**
-   * 页面相关事件处理函数--监听用户下拉动作
-   */
-  onPullDownRefresh() {
-
-  },
-
-  /**
-   * 页面上拉触底事件的处理函数
-   */
-  onReachBottom() {
-
-  },
-
-  /**
-   * 用户点击右上角分享
-   */
-  onShareAppMessage() {
-
+  _parseIngredients(ingredientsStr) {
+    if (!ingredientsStr) return [];
+    try {
+      return JSON.parse(ingredientsStr);
+    } catch (e) {
+      return [];
+    }
   }
-})
+});

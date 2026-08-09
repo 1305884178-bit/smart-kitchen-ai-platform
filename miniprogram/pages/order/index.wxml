@@ -1,2 +1,45 @@
 <!--pages/order/index.wxml-->
-<text>pages/order/index.wxml</text>
+<view class="page-container">
+  <!-- 座位选择 -->
+  <view class="card">
+    <view class="section-title">选择座位</view>
+    <view class="seat-grid">
+      <block wx:for="{{seats}}" wx:key="seatNumber">
+        <view
+          class="seat-item {{item.occupied ? 'seat-occupied' : (selectedSeat === item.seatNumber ? 'seat-selected' : 'seat-free')}}"
+          data-seat="{{item.seatNumber}}"
+          bindtap="onSeatTap"
+        >{{item.seatNumber}}</view>
+      </block>
+    </view>
+  </view>
+
+  <!-- 已选菜品 -->
+  <view class="card">
+    <view class="section-title">订单菜品</view>
+    <view class="order-item" wx:for="{{cartItems}}" wx:key="dishId">
+      <text class="item-name">{{item.dishName}} x{{item.quantity}}</text>
+      <text class="item-price">¥{{item.price * item.quantity}}</text>
+    </view>
+    <view class="order-divider"></view>
+    <view class="order-total">
+      <text>合计</text>
+      <text class="total-price">¥{{totalAmount}}</text>
+    </view>
+  </view>
+
+  <!-- 备注 -->
+  <view class="card">
+    <view class="section-title">备注</view>
+    <input class="remark-input" placeholder="如有特殊需求请备注（选填）" value="{{remark}}" bindinput="onRemarkInput" />
+  </view>
+
+  <!-- 提交按钮 -->
+  <view class="submit-section safe-bottom">
+    <button
+      class="submit-btn {{selectedSeat && cartItems.length > 0 ? '' : 'btn-disabled'}}"
+      bindtap="onSubmit"
+      disabled="{{!selectedSeat || cartItems.length === 0 || submitting}}"
+    >{{submitting ? '提交中...' : '提交订单'}}</button>
+  </view>
+</view>

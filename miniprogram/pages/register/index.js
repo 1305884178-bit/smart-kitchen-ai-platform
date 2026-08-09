@@ -1,66 +1,100 @@
 // pages/register/index.js
+const app = getApp();
+
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
+    nickname: '',
+    avatar: '',
+    phone: '',
+    submitting: false
   },
 
   /**
-   * 生命周期函数--监听页面加载
+   * 选择头像
    */
-  onLoad(options) {
-
+  onChooseAvatar(e) {
+    const { avatarUrl } = e.detail;
+    this.setData({ avatar: avatarUrl });
   },
 
   /**
-   * 生命周期函数--监听页面初次渲染完成
+   * 输入昵称
    */
-  onReady() {
-
+  onNicknameInput(e) {
+    this.setData({ nickname: e.detail.value });
   },
 
   /**
-   * 生命周期函数--监听页面显示
+   * 输入手机号
    */
-  onShow() {
-
+  onPhoneInput(e) {
+    this.setData({ phone: e.detail.value });
   },
 
   /**
-   * 生命周期函数--监听页面隐藏
+   * 提交注册
    */
-  onHide() {
+  onSubmit() {
+    const { nickname, phone } = this.data;
+    if (!nickname.trim()) {
+      wx.showToast({ title: '请输入昵称', icon: 'none' });
+      return;
+    }
+    if (!phone.trim() || !/^1\d{10}$/.test(phone)) {
+      wx.showToast({ title: '请输入正确的手机号', icon: 'none' });
+      return;
+    }
 
-  },
+    this.setData({ submitting: true });
 
-  /**
-   * 生命周期函数--监听页面卸载
-   */
-  onUnload() {
-
-  },
-
-  /**
-   * 页面相关事件处理函数--监听用户下拉动作
-   */
-  onPullDownRefresh() {
-
-  },
-
-  /**
-   * 页面上拉触底事件的处理函数
-   */
-  onReachBottom() {
-
-  },
-
-  /**
-   * 用户点击右上角分享
-   */
-  onShareAppMessage() {
-
+    // 获取微信 code 并注册
+    wx.login({
+      success: (loginRes) => {
+        if (!loginRes.code) {
+          this.setData({ submitting: false });
+          wx.showToast({ title: '获取微信授权失败', icon: 'none' });
+          return;
+        }
+        wx.request({
+          url: `${app.globalData.apiBase}/api/auth/register`,
+          method: 'POST',
+          data: {
+            code: loginRes.code,
+            nickname: nickname.trim(),
+            avatar: this.data.avatar,
+            phone: phone.trim()
+          },
+          success: (res) => {
+            this.setData({ submitting: false });
+            if (res.statusCode === 200 && res.data?.code === 200) {
+              const token = res.data.data?.token;
+              if (token) {
+                wx.setStorageSync('token', token);
+                app.globalData.isLoggedIn = true;
+                wx.showToast({ title: '注册成功', icon: 'success' });
+                setTimeout(() => {
+                  wx.reLaunch({ url: '/pages/menu/index' });
+                }, 1000);
+              } else {
+                wx.showToast({ title: '注册失败', icon: 'none' });
+              }
+            } else {
+              wx.showToast({
+                title: res.data?.message || '注册失败',
+                icon: 'none'
+              });
+            }
+          },
+          fail: () => {
+            this.setData({ submitting: false });
+            wx.showToast({ title: '网络异常', icon: 'none' });
+          }
+        });
+      },
+      fail: () => {
+        this.setData({ submitting: false });
+        wx.showToast({ title: '微信登录失败', icon: 'none' });
+      }
+    });
   }
-})
+});

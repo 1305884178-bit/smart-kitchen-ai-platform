@@ -1,0 +1,116 @@
+/* pages/order/index.wxss */
+.page-container {
+  min-height: 100vh;
+  background: #f5f5f5;
+  padding-bottom: 140rpx;
+}
+
+.section-title {
+  font-size: 30rpx;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 20rpx;
+}
+
+.seat-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.seat-item {
+  width: 120rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  text-align: center;
+  border-radius: 10rpx;
+  font-size: 24rpx;
+}
+
+.seat-free {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1rpx solid #a5d6a7;
+}
+
+.seat-selected {
+  background: #ff6b35;
+  color: #fff;
+  border: 1rpx solid #ff6b35;
+}
+
+.seat-occupied {
+  background: #f5f5f5;
+  color: #ccc;
+  border: 1rpx solid #e0e0e0;
+}
+
+.order-item {
+  display: flex;
+  align-items: center;
+  padding: 12rpx 0;
+  border-bottom: 1rpx solid #f5f5f5;
+}
+
+.item-name {
+  flex: 1;
+  font-size: 28rpx;
+  color: #333;
+}
+
+.item-price {
+  font-size: 28rpx;
+  color: #ff6b35;
+  font-weight: 500;
+}
+
+.order-divider {
+  height: 1rpx;
+  background: #e0e0e0;
+  margin: 16rpx 0;
+}
+
+.order-total {
+  display: flex;
+  justify-content: space-between;
+  font-size: 30rpx;
+  font-weight: 500;
+}
+
+.total-price {
+  color: #ff6b35;
+  font-weight: bold;
+}
+
+.remark-input {
+  width: 100%;
+  height: 72rpx;
+  padding: 0 16rpx;
+  border: 1rpx solid #e0e0e0;
+  border-radius: 10rpx;
+  font-size: 26rpx;
+  box-sizing: border-box;
+}
+
+.submit-section {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16rpx 24rpx;
+  background: #fff;
+  box-shadow: 0 -2rpx 12rpx rgba(0,0,0,0.06);
+}
+
+.submit-btn {
+  width: 100%;
+  background: #ff6b35;
+  color: #fff;
+  border-radius: 12rpx;
+  font-size: 32rpx;
+  padding: 20rpx 0;
+}
+
+.submit-btn::after {
+  border: none;
+}

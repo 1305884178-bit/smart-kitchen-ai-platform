@@ -1,66 +1,111 @@
 // pages/ai-chat/index.js
+const { createSSE } = require('../../utils/sse');
+
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
+    messages: [],
+    inputValue: '',
+    sending: false,
+    aiTyping: false,
+    scrollToView: ''
   },
 
-  /**
-   * 生命周期函数--监听页面加载
-   */
-  onLoad(options) {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面初次渲染完成
-   */
-  onReady() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面显示
-   */
   onShow() {
-
+    // 初始化欢迎消息
+    if (this.data.messages.length === 0) {
+      this.setData({
+        messages: [{
+          role: 'assistant',
+          content: '你好！我是智慧后厨的AI客服，可以帮你推荐菜品、查询库存和配料信息，请问有什么可以帮你的？'
+        }]
+      });
+    }
   },
 
   /**
-   * 生命周期函数--监听页面隐藏
+   * 输入框内容变化
    */
-  onHide() {
-
+  onInput(e) {
+    this.setData({ inputValue: e.detail.value });
   },
 
   /**
-   * 生命周期函数--监听页面卸载
+   * 发送消息
    */
-  onUnload() {
+  onSend() {
+    const question = this.data.inputValue.trim();
+    if (!question || this.data.sending) return;
 
+    // 添加用户消息
+    const messages = [...this.data.messages, {
+      role: 'user',
+      content: question
+    }];
+    this.setData({
+      messages,
+      inputValue: '',
+      sending: true,
+      aiTyping: true
+    });
+
+    // 滚动到底部
+    this._scrollToBottom();
+
+    // 添加一个空的 AI 消息占位
+    const aiMsgIndex = messages.length;
+    messages.push({ role: 'assistant', content: '' });
+    this.setData({ messages });
+
+    let fullContent = '';
+
+    // 创建 SSE 连接接收流式回复
+    this._sse = createSSE({
+      url: '/ai/chat',
+      data: { question },
+      onMessage: (chunk) => {
+        fullContent += chunk;
+        messages[aiMsgIndex] = {
+          role: 'assistant',
+          content: fullContent
+        };
+        this.setData({
+          messages,
+          aiTyping: false
+        });
+        this._scrollToBottom();
+      },
+      onComplete: () => {
+        this.setData({
+          sending: false,
+          aiTyping: false
+        });
+        this._sse = null;
+      },
+      onError: (err) => {
+        console.error('SSE error:', err);
+        if (fullContent === '') {
+          messages[aiMsgIndex] = {
+            role: 'assistant',
+            content: '抱歉，AI客服暂时不可用，请稍后再试。'
+          };
+        }
+        this.setData({
+          messages,
+          sending: false,
+          aiTyping: false
+        });
+        this._sse = null;
+      }
+    });
   },
 
   /**
-   * 页面相关事件处理函数--监听用户下拉动作
+   * 滚动到底部
    */
-  onPullDownRefresh() {
-
-  },
-
-  /**
-   * 页面上拉触底事件的处理函数
-   */
-  onReachBottom() {
-
-  },
-
-  /**
-   * 用户点击右上角分享
-   */
-  onShareAppMessage() {
-
+  _scrollToBottom() {
+    const len = this.data.messages.length;
+    if (len > 0) {
+      this.setData({ scrollToView: `msg-${len - 1}` });
+    }
   }
-})
+});

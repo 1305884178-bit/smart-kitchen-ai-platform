@@ -1,2 +1,24 @@
 <!--pages/my-orders/index.wxml-->
-<text>pages/my-orders/index.wxml</text>
+<view class="page-container">
+  <!-- 订单列表 -->
+  <view class="order-card" wx:for="{{orders}}" wx:key="id" data-id="{{item.id}}" bindtap="onOrderTap">
+    <view class="flex-between">
+      <text class="order-no">{{item.orderNo}}</text>
+      <text class="status-tag status-{{item.status}}">{{_statusText(item.status)}}</text>
+    </view>
+    <view class="order-info">
+      <text>座位: {{item.seatNumber}}</text>
+      <text class="order-amount">¥{{item.totalAmount}}</text>
+    </view>
+    <view class="order-dishes ellipsis">
+      {{_dishNames(item.details)}}
+    </view>
+    <text class="order-time">{{_formatTime(item.createTime)}}</text>
+  </view>
+
+  <view wx:if="{{orders.length === 0 && !loading}}" class="empty-tip">暂无订单</view>
+
+  <!-- 加载更多 -->
+  <view wx:if="{{loadingMore}}" class="loading-tip">加载中...</view>
+  <view wx:elif="{{!hasMore && orders.length > 0}}" class="no-more">-- 没有更多了 --</view>
+</view>

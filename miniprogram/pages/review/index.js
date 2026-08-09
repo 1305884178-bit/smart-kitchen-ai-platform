@@ -1,66 +1,65 @@
 // pages/review/index.js
+const request = require('../../utils/request');
+
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
+    orderId: null,
+    score: 0,
+    comment: '',
+    submitting: false
   },
 
-  /**
-   * 生命周期函数--监听页面加载
-   */
   onLoad(options) {
-
+    const orderId = options.orderId;
+    if (orderId) {
+      this.setData({ orderId });
+    }
   },
 
   /**
-   * 生命周期函数--监听页面初次渲染完成
+   * 点击星级
    */
-  onReady() {
-
+  onStarTap(e) {
+    const score = e.currentTarget.dataset.score;
+    this.setData({ score });
   },
 
   /**
-   * 生命周期函数--监听页面显示
+   * 输入评价
    */
-  onShow() {
-
+  onCommentInput(e) {
+    this.setData({ comment: e.detail.value });
   },
 
   /**
-   * 生命周期函数--监听页面隐藏
+   * 提交评价
    */
-  onHide() {
+  onSubmit() {
+    const { orderId, score, comment } = this.data;
+    if (!orderId) {
+      wx.showToast({ title: '订单信息缺失', icon: 'none' });
+      return;
+    }
+    if (score === 0) {
+      wx.showToast({ title: '请选择评分', icon: 'none' });
+      return;
+    }
 
-  },
+    this.setData({ submitting: true });
 
-  /**
-   * 生命周期函数--监听页面卸载
-   */
-  onUnload() {
-
-  },
-
-  /**
-   * 页面相关事件处理函数--监听用户下拉动作
-   */
-  onPullDownRefresh() {
-
-  },
-
-  /**
-   * 页面上拉触底事件的处理函数
-   */
-  onReachBottom() {
-
-  },
-
-  /**
-   * 用户点击右上角分享
-   */
-  onShareAppMessage() {
-
+    request.post('/api/review/submit', {
+      orderId: parseInt(orderId),
+      score: score,
+      comment: comment
+    })
+      .then(() => {
+        wx.showToast({ title: '评价成功', icon: 'success' });
+        setTimeout(() => {
+          wx.navigateBack();
+        }, 1000);
+      })
+      .catch(() => {
+        this.setData({ submitting: false });
+      });
   }
-})
+});

@@ -1,66 +1,89 @@
 // pages/my-orders/index.js
+const request = require('../../utils/request');
+
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
+    orders: [],
+    page: 1,
+    size: 10,
+    hasMore: true,
+    loading: false,
+    loadingMore: false
   },
 
-  /**
-   * 生命周期函数--监听页面加载
-   */
-  onLoad(options) {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面初次渲染完成
-   */
-  onReady() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面显示
-   */
   onShow() {
-
+    this.setData({ page: 1, orders: [], hasMore: true });
+    this._loadOrders();
   },
 
   /**
-   * 生命周期函数--监听页面隐藏
+   * 加载订单列表（分页）
    */
-  onHide() {
+  _loadOrders() {
+    const { page, size, loading } = this.data;
+    if (loading) return;
 
+    const isFirstPage = page === 1;
+    this.setData({
+      loading: true,
+      loadingMore: !isFirstPage
+    });
+
+    request.get('/api/order/my-list', { page, size })
+      .then(result => {
+        const records = result.records || [];
+        const newOrders = isFirstPage ? records : [...this.data.orders, ...records];
+        this.setData({
+          orders: newOrders,
+          hasMore: records.length >= size,
+          page: page + 1,
+          loading: false,
+          loadingMore: false
+        });
+      })
+      .catch(() => {
+        this.setData({ loading: false, loadingMore: false });
+      });
   },
 
   /**
-   * 生命周期函数--监听页面卸载
-   */
-  onUnload() {
-
-  },
-
-  /**
-   * 页面相关事件处理函数--监听用户下拉动作
-   */
-  onPullDownRefresh() {
-
-  },
-
-  /**
-   * 页面上拉触底事件的处理函数
+   * 上拉加载更多
    */
   onReachBottom() {
-
+    if (this.data.hasMore && !this.data.loadingMore) {
+      this._loadOrders();
+    }
   },
 
   /**
-   * 用户点击右上角分享
+   * 点击订单跳转详情
    */
-  onShareAppMessage() {
+  onOrderTap(e) {
+    const orderId = e.currentTarget.dataset.id;
+    wx.navigateTo({ url: `/pages/order-detail/index?id=${orderId}` });
+  },
 
+  /**
+   * 获取状态文本
+   */
+  _statusText(status) {
+    const map = { 0: '已下单', 1: '已出餐', 2: '已结账', 3: '已取消' };
+    return map[status] || '未知';
+  },
+
+  /**
+   * 菜品名称拼接
+   */
+  _dishNames(details) {
+    if (!details || details.length === 0) return '';
+    return details.map(d => d.dishName).join('、');
+  },
+
+  /**
+   * 格式化时间
+   */
+  _formatTime(timeStr) {
+    if (!timeStr) return '';
+    return timeStr.replace('T', ' ').substring(0, 16);
   }
-})
+});

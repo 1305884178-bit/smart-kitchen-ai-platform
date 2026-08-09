@@ -1,2 +1,34 @@
 <!--pages/review/index.wxml-->
-<text>pages/review/index.wxml</text>
+<view class="page-container">
+  <view class="card">
+    <view class="section-title">餐后评价</view>
+
+    <!-- 星级评分 -->
+    <view class="star-row">
+      <text
+        wx:for="{{[1,2,3,4,5]}}"
+        wx:key="*this"
+        class="star {{item <= score ? 'star-active' : ''}}"
+        data-score="{{item}}"
+        bindtap="onStarTap"
+      >★</text>
+    </view>
+
+    <!-- 评价文字 -->
+    <textarea
+      class="review-textarea"
+      placeholder="说说你的用餐体验吧（选填，最多200字）"
+      value="{{comment}}"
+      bindinput="onCommentInput"
+      maxlength="200"
+      auto-height
+    />
+
+    <!-- 提交按钮 -->
+    <button
+      class="submit-btn {{submitting ? 'btn-disabled' : ''}}"
+      bindtap="onSubmit"
+      disabled="{{submitting || score === 0}}"
+    >{{submitting ? '提交中...' : '提交评价'}}</button>
+  </view>
+</view>

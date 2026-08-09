@@ -1,66 +1,138 @@
 // pages/order-detail/index.js
+const request = require('../../utils/request');
+
+// 订单状态映射
+const STATUS_MAP = {
+  0: '已下单',
+  1: '已出餐',
+  2: '已结账',
+  3: '已取消'
+};
+
+// 状态对应可操作按钮
+const ACTION_MAP = {
+  0: [{ label: '加菜', type: 'ADD_DISH' }, { label: '结账', type: 'PAY' }],
+  1: [{ label: '结账', type: 'PAY' }],
+  2: [{ label: '评价', type: 'REVIEW' }]
+};
+
 Page({
-
-  /**
-   * 页面的初始数据
-   */
   data: {
-
+    order: null,
+    loading: true,
+    statusText: '',
+    actions: [],
+    orderId: null,
+    pollingTimer: null
   },
 
-  /**
-   * 生命周期函数--监听页面加载
-   */
   onLoad(options) {
-
+    const orderId = options.id;
+    if (orderId) {
+      this.setData({ orderId });
+      this._loadOrderDetail();
+    }
   },
 
-  /**
-   * 生命周期函数--监听页面初次渲染完成
-   */
-  onReady() {
-
-  },
-
-  /**
-   * 生命周期函数--监听页面显示
-   */
   onShow() {
-
+    if (this.data.orderId) {
+      this._loadOrderDetail();
+    }
   },
 
-  /**
-   * 生命周期函数--监听页面隐藏
-   */
   onHide() {
-
+    this._stopPolling();
   },
 
-  /**
-   * 生命周期函数--监听页面卸载
-   */
   onUnload() {
-
+    this._stopPolling();
   },
 
   /**
-   * 页面相关事件处理函数--监听用户下拉动作
+   * 加载订单详情
    */
-  onPullDownRefresh() {
-
+  _loadOrderDetail() {
+    request.get(`/api/order/my-detail/${this.data.orderId}`)
+      .then(order => {
+        const statusText = STATUS_MAP[order.status] || '未知';
+        const availableActions = order.availableActions || [];
+        const actions = availableActions.map(a => ({
+          label: this._getActionLabel(a),
+          type: a
+        }));
+        this.setData({ order, statusText, actions, loading: false });
+      })
+      .catch(() => {
+        this.setData({ loading: false });
+      });
   },
 
   /**
-   * 页面上拉触底事件的处理函数
+   * 获取操作按钮文案
    */
-  onReachBottom() {
-
+  _getActionLabel(action) {
+    const labels = {
+      ADD_DISH: '加菜',
+      PAY: '结账',
+      REVIEW: '评价'
+    };
+    return labels[action] || action;
   },
 
   /**
-   * 用户点击右上角分享
+   * 操作按钮点击
    */
-  onShareAppMessage() {
+  onAction(e) {
+    const action = e.currentTarget.dataset.action;
+    const { orderId } = this.data;
 
+    switch (action) {
+      case 'ADD_DISH':
+        wx.navigateTo({ url: `/pages/menu/index?addToOrderId=${orderId}` });
+        break;
+      case 'PAY':
+        this._onPay();
+        break;
+      case 'REVIEW':
+        wx.navigateTo({ url: `/pages/review/index?orderId=${orderId}` });
+        break;
+    }
+  },
+
+  /**
+   * 结账支付
+   */
+  _onPay() {
+    wx.showModal({
+      title: '确认结账',
+      content: `确认支付 ¥${this.data.order.totalAmount} 吗？`,
+      success: (res) => {
+        if (res.confirm) {
+          request.post(`/api/order/${this.data.orderId}/pay`)
+            .then(() => {
+              wx.showToast({ title: '支付成功', icon: 'success' });
+              this._loadOrderDetail();
+            });
+        }
+      }
+    });
+  },
+
+  /**
+   * 停止轮询
+   */
+  _stopPolling() {
+    if (this.data.pollingTimer) {
+      clearInterval(this.data.pollingTimer);
+      this.data.pollingTimer = null;
+    }
+  },
+
+  /**
+   * 格式化时间
+   */
+  _formatTime(timeStr) {
+    if (!timeStr) return '';
+    return timeStr.replace('T', ' ').substring(0, 16);
   }
-})
+});
