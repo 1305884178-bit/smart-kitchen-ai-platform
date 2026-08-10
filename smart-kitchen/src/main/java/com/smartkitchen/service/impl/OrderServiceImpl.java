@@ -2,6 +2,7 @@ package com.smartkitchen.service.impl;
 
 import com.smartkitchen.config.KitchenBoardWebSocketHandler;
 import com.smartkitchen.config.CustomerWebSocketHandler;
+import com.smartkitchen.config.RabbitMQConfig;
 import com.smartkitchen.config.UserContext;
 import com.smartkitchen.dto.AddDishDTO;
 import com.smartkitchen.dto.OrderDetailVO;
@@ -22,6 +23,7 @@ import com.smartkitchen.mapper.DishMapper;
 import com.smartkitchen.mapper.OrderMapper;
 import com.smartkitchen.service.OrderDetailService;
 import com.smartkitchen.service.OrderService;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import jakarta.annotation.PostConstruct;
@@ -54,6 +56,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Autowired
     private CustomerWebSocketHandler customerWebSocketHandler;
+
+    @Autowired(required = false)
+    private RabbitTemplate rabbitTemplate;
 
     private static final String STOCK_PREFIX = "dish:stock:";
 
@@ -146,6 +151,16 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             }
 
             kitchenBoardWebSocketHandler.sendMessage("{\"type\":\"NEW_ORDER\",\"message\":\"有新订单了\"}");
+
+            // 发送延迟消息到RabbitMQ，30分钟后未支付自动取消
+            if (rabbitTemplate != null) {
+                rabbitTemplate.convertAndSend(
+                        RabbitMQConfig.ORDER_DELAY_EXCHANGE,
+                        RabbitMQConfig.ORDER_DELAY_ROUTING_KEY,
+                        order.getId().toString()
+                );
+            }
+
             return orderNo;
         } catch (Exception e) {
             stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));

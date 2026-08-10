@@ -134,4 +134,37 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         vo.setNeedRegister(false);
         return vo;
     }
+
+    @Override
+    public LoginVO checkToken(String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+            throw new RuntimeException("未提供有效的认证信息");
+        }
+
+        String token = authHeader.substring(7);
+
+        if (!jwtUtil.validateToken(token)) {
+            throw new RuntimeException("Token无效或已过期");
+        }
+
+        io.jsonwebtoken.Claims claims = jwtUtil.parseToken(token);
+        Long userId = claims.get("userId", Long.class);
+        String role = claims.get("role", String.class);
+
+        if (userId == null) {
+            throw new RuntimeException("Token中缺少用户标识");
+        }
+
+        User user = this.getById(userId);
+        if (user == null) {
+            throw new RuntimeException("用户不存在");
+        }
+
+        LoginVO vo = new LoginVO();
+        vo.setToken(token);
+        vo.setUserId(user.getId());
+        vo.setRole(user.getRole());
+        vo.setNeedRegister(false);
+        return vo;
+    }
 }

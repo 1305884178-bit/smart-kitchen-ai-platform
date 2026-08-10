@@ -10,6 +10,10 @@ spring:
       encoding: UTF-8
       schema-locations: classpath:schema-h2.sql
       data-locations: classpath:data-h2.sql
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
 
 smart-kitchen:
   jwt:

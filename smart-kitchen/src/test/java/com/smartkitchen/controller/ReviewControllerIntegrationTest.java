@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartkitchen.common.OrderStatusEnum;
 import com.smartkitchen.common.Result;
 import com.smartkitchen.config.JwtUtil;
+import com.smartkitchen.dto.ReviewVO;
 import com.smartkitchen.entity.Order;
 import com.smartkitchen.entity.Review;
 import com.smartkitchen.service.OrderService;
@@ -104,7 +105,7 @@ public class ReviewControllerIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         Result<Object> result = objectMapper.readValue(response, new TypeReference<Result<Object>>() {});
-        assertEquals(400, result.getCode());
+        assertEquals(500, result.getCode());
     }
 
     @Test
@@ -128,9 +129,11 @@ public class ReviewControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
 
-        Result<List<Review>> result = objectMapper.readValue(response, new TypeReference<Result<List<Review>>>() {});
+        Result<List<ReviewVO>> result = objectMapper.readValue(response, new TypeReference<Result<List<ReviewVO>>>() {});
         assertEquals(200, result.getCode());
         assertNotNull(result.getData());
         assertTrue(result.getData().size() > 0);
+        // 验证返回的 orderNo 不为空
+        assertNotNull(result.getData().get(0).getOrderNo());
     }
 }

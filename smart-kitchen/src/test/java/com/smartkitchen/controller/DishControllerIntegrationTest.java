@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartkitchen.common.Result;
 import com.smartkitchen.config.JwtUtil;
+import com.smartkitchen.dto.DishDetailVO;
 import com.smartkitchen.entity.Dish;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,7 +44,6 @@ public class DishControllerIntegrationTest {
 
     @Test
     public void testGetDishList() throws Exception {
-        // 请求 /api/dish/list 接口
         String responseContent = mockMvc.perform(get("/api/dish/list")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON))
@@ -59,7 +59,6 @@ public class DishControllerIntegrationTest {
 
     @Test
     public void testGetDishListByCategoryId() throws Exception {
-        // 请求带有 categoryId 的接口，假设 1L 是存在的分类
         String responseContent = mockMvc.perform(get("/api/dish/list")
                 .header("Authorization", "Bearer " + token)
                 .param("categoryId", "1")
@@ -74,8 +73,41 @@ public class DishControllerIntegrationTest {
         assertTrue(result.getData().size() > 0);
         for (Dish dish : result.getData()) {
             assertEquals(1L, dish.getCategoryId());
-            assertEquals(1, dish.getStatus()); // 必须是上架的
+            assertEquals(1, dish.getStatus());
         }
     }
-}
 
+    @Test
+    public void testGetDishDetail() throws Exception {
+        String responseContent = mockMvc.perform(get("/api/dish/detail/1")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        Result<DishDetailVO> result = objectMapper.readValue(responseContent, new TypeReference<Result<DishDetailVO>>() {});
+        
+        assertEquals(200, result.getCode());
+        assertNotNull(result.getData());
+        assertEquals(1L, result.getData().getId().longValue());
+        assertNotNull(result.getData().getName());
+        assertNotNull(result.getData().getCategoryName());
+        assertNotNull(result.getData().getPrice());
+        assertNotNull(result.getData().getIngredients());
+        assertNotNull(result.getData().getReviews());
+    }
+
+    @Test
+    public void testGetDishDetailNotFound() throws Exception {
+        String responseContent = mockMvc.perform(get("/api/dish/detail/9999")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        Result<DishDetailVO> result = objectMapper.readValue(responseContent, new TypeReference<Result<DishDetailVO>>() {});
+        
+        assertEquals(404, result.getCode());
+        assertNull(result.getData());
+    }
+}

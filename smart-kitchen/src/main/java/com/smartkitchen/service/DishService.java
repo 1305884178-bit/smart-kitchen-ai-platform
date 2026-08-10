@@ -1,6 +1,7 @@
 package com.smartkitchen.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.smartkitchen.dto.DishDetailVO;
 import com.smartkitchen.dto.DishIngredientVO;
 import com.smartkitchen.dto.DishInventoryVO;
 import com.smartkitchen.entity.Dish;
@@ -18,6 +19,13 @@ public interface DishService extends IService<Dish> {
      * @return 菜品列表
      */
     List<Dish> listByCategoryId(Long categoryId);
+
+    /**
+     * 根据菜品ID查询菜品详情（含分类名与已有评价）
+     * @param dishId 菜品ID
+     * @return 菜品详情VO，未找到返回null
+     */
+    DishDetailVO getDishDetail(Long dishId);
 
     /**
      * 根据菜品名称模糊查询菜品库存信息

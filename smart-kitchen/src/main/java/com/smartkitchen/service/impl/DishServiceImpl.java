@@ -3,20 +3,39 @@ package com.smartkitchen.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.smartkitchen.common.DishStatusEnum;
+import com.smartkitchen.dto.DishDetailVO;
 import com.smartkitchen.dto.DishIngredientVO;
 import com.smartkitchen.dto.DishInventoryVO;
+import com.smartkitchen.entity.Category;
 import com.smartkitchen.entity.Dish;
+import com.smartkitchen.entity.OrderDetail;
+import com.smartkitchen.entity.Review;
 import com.smartkitchen.mapper.DishMapper;
+import com.smartkitchen.service.CategoryService;
 import com.smartkitchen.service.DishService;
+import com.smartkitchen.service.OrderDetailService;
+import com.smartkitchen.service.ReviewService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 菜品服务实现类
  */
 @Service
 public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements DishService {
+
+    @Autowired
+    private CategoryService categoryService;
+
+    @Autowired
+    private OrderDetailService orderDetailService;
+
+    @Autowired
+    private ReviewService reviewService;
 
     /**
      * 根据分类ID查询起售状态的菜品列表
@@ -30,6 +49,67 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
         queryWrapper.eq(Dish::getStatus, DishStatusEnum.ON_SALE.getCode());
         queryWrapper.orderByDesc(Dish::getUpdateTime);
         return this.list(queryWrapper);
+    }
+
+    /**
+     * 根据菜品ID查询菜品详情（含分类名与已有评价）
+     * @param dishId 菜品ID
+     * @return 菜品详情VO，未找到返回null
+     */
+    @Override
+    public DishDetailVO getDishDetail(Long dishId) {
+        Dish dish = this.getById(dishId);
+        if (dish == null) {
+            return null;
+        }
+
+        DishDetailVO vo = new DishDetailVO();
+        vo.setId(dish.getId());
+        vo.setName(dish.getName());
+        vo.setCategoryId(dish.getCategoryId());
+        vo.setPrice(dish.getPrice());
+        vo.setImage(dish.getImage());
+        vo.setStatus(dish.getStatus());
+        vo.setDailyStock(dish.getDailyStock());
+        vo.setAlertThreshold(dish.getAlertThreshold());
+        vo.setIngredients(dish.getIngredients());
+        vo.setCreateTime(dish.getCreateTime());
+        vo.setUpdateTime(dish.getUpdateTime());
+
+        // 填入分类名
+        Category category = categoryService.getById(dish.getCategoryId());
+        if (category != null) {
+            vo.setCategoryName(category.getName());
+        }
+
+        // 查询包含该菜品的所有订单明细，获取订单ID列表
+        LambdaQueryWrapper<OrderDetail> odWrapper = new LambdaQueryWrapper<>();
+        odWrapper.eq(OrderDetail::getDishId, dishId);
+        odWrapper.select(OrderDetail::getOrderId);
+        List<OrderDetail> orderDetails = orderDetailService.list(odWrapper);
+        List<Long> orderIds = orderDetails.stream()
+                .map(OrderDetail::getOrderId)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // 查询这些订单的评价
+        List<DishDetailVO.ReviewItem> reviews = Collections.emptyList();
+        if (!orderIds.isEmpty()) {
+            LambdaQueryWrapper<Review> reviewWrapper = new LambdaQueryWrapper<>();
+            reviewWrapper.in(Review::getOrderId, orderIds);
+            reviewWrapper.orderByDesc(Review::getCreateTime);
+            List<Review> reviewList = reviewService.list(reviewWrapper);
+            reviews = reviewList.stream().map(r -> {
+                DishDetailVO.ReviewItem item = new DishDetailVO.ReviewItem();
+                item.setScore(r.getScore());
+                item.setComment(r.getComment());
+                item.setCreateTime(r.getCreateTime());
+                return item;
+            }).collect(Collectors.toList());
+        }
+        vo.setReviews(reviews);
+
+        return vo;
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.smartkitchen.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.smartkitchen.dto.ReviewVO;
 import com.smartkitchen.entity.Review;
 
 import java.util.List;
@@ -17,9 +18,9 @@ public interface ReviewService extends IService<Review> {
     void submitReview(Review review);
 
     /**
-     * 按评分筛选评价列表（score为null时返回全部）
+     * 按评分筛选评价列表（含订单号，score为null时返回全部）
      * @param score 评分（可选，1-5）
-     * @return 评价列表
+     * @return 评价VO列表
      */
-    List<Review> listByScore(Integer score);
+    List<ReviewVO> listByScore(Integer score);
 }

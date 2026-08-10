@@ -6,7 +6,9 @@ import com.smartkitchen.dto.LoginVO;
 import com.smartkitchen.dto.WxLoginDTO;
 import com.smartkitchen.dto.WxRegisterDTO;
 import com.smartkitchen.service.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -50,5 +52,16 @@ public class AuthController {
     @PostMapping("/login")
     public Result<LoginVO> login(@RequestBody LoginDTO loginDTO) {
         return Result.success(userService.login(loginDTO));
+    }
+
+    /**
+     * 校验 token 有效性
+     * @param request HTTP 请求（用于提取 Authorization header）
+     * @return 用户信息
+     */
+    @GetMapping("/check-token")
+    public Result<LoginVO> checkToken(HttpServletRequest request) {
+        String authHeader = request.getHeader("Authorization");
+        return Result.success(userService.checkToken(authHeader));
     }
 }

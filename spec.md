@@ -439,3 +439,99 @@ return SUCCESS
 | spring.data.redis.* | Redis 连接信息 | localhost:6379 |
 | jwt.secret | JWT 签名密钥 | Base64 编码的随机串 |
 | jwt.expiration | Token 有效期（秒） | 7200 |
+
+## 11. RabbitMQ 订单超时延迟消息
+
+### 11.1 方案选型
+
+| 方案 | 可靠性 | 延迟精度 | 运维复杂度 | 结论 |
+|------|--------|----------|------------|------|
+| Redis Keyspace Notification | 低（`__keyevent` 通知不可靠，可能丢失） | 一般 | 低 | 仅适用于轻量场景 |
+| Spring `@Scheduled` 定时轮询 DB | 中等 | 差（依赖轮询间隔） | 低 | 大规模订单时 DB 压力大 |
+| RabbitMQ DLX + TTL | 高（消息持久化 + ACK 确认） | 高（毫秒级） | 中等 | **选用**，无需额外插件 |
+| RabbitMQ Delayed Message Plugin | 高 | 高 | 需额外安装插件 | 更简洁但依赖插件 |
+
+**结论**：选用 RabbitMQ 死信队列（DLX）+ TTL 方案，无需安装额外插件，通用性强。
+
+### 11.2 架构设计
+
+```
+submitOrder()
+     │
+     ▼
+发送消息（orderId）到 order.delay.exchange
+     │
+     ▼
+order.delay.queue（x-message-ttl=30min，绑定死信交换机）
+     │  ─── 30 分钟后消息过期 ───
+     ▼
+order.timeout.exchange（死信交换机 DLX，重新路由过期消息）
+     │
+     ▼
+order.timeout.queue（消费者实际监听）
+     │
+     ▼
+OrderTimeoutConsumer.handleOrderTimeout(orderId)
+     │
+     ├─ 查订单状态
+     │    ├─ ORDERED / SERVED（未支付） → cancelOrder() 取消 + 归还库存
+     │    └─ PAID / CANCELLED → 跳过
+     └─ 手动 ACK
+```
+
+### 11.3 交换机与队列设计
+
+| 组件 | 名称 | 类型 | 关键参数 |
+|------|------|------|----------|
+| 延迟交换机 | `order.delay.exchange` | Direct | — |
+| 延迟队列 | `order.delay.queue` | Durable | `x-message-ttl=1800000`，`x-dead-letter-exchange=order.timeout.exchange`，`x-dead-letter-routing-key=order.timeout` |
+| 死信交换机 | `order.timeout.exchange` | Direct | — |
+| 超时消费队列 | `order.timeout.queue` | Durable | 消费者手动 ACK |
+| 绑定 1 | delayBinding | — | `order.delay.exchange` → `order.delay.queue`，routingKey=`order.delay` |
+| 绑定 2 | timeoutBinding | — | `order.timeout.exchange` → `order.timeout.queue`，routingKey=`order.timeout` |
+
+### 11.4 文件变更清单
+
+1. **新增 `config/RabbitMQConfig.java`**：`@Configuration` + `@Bean` 声明交换机、队列、绑定，队列持久化，常量 `public static final` 向外暴露。
+
+2. **新增 `service/OrderTimeoutConsumer.java`**：`@RabbitListener(queues = "order.timeout.queue")` 消费超时消息。查订单状态 → 仅 ORDERED/SERVED 调用 `orderService.cancelOrder()` → PAID/CANCELLED 直接 ACK。消费异常记录日志后 ACK（避免死循环），配合人工补偿。
+
+3. **修改 `service/impl/OrderServiceImpl.java`**：注入 `RabbitTemplate`，`submitOrder()` 落库成功后调用 `rabbitTemplate.convertAndSend(ORDER_DELAY_EXCHANGE, ORDER_DELAY_ROUTING_KEY, order.getId().toString())`，消息体仅含 `orderId`。
+
+### 11.5 边界情况
+
+| 场景 | 处理方式 |
+|------|----------|
+| 用户在 30 分钟内主动支付 | 消费者收到时订单已为 PAID → 跳过 |
+| 用户/管理员在 30 分钟内主动撤销 | 消费者收到时已为 CANCELLED → 跳过 |
+| 超时消息消费时订单已不存在 | `orderService.getById()` 返回 null → 记录日志后 ACK |
+| RabbitMQ 宕机期间下单 | 消息未发送成功，订单正常流转但不自动取消，需人工排查 |
+| 消费者处理异常 | 记录日志后手动 ACK，配合告警后续人工补偿 |
+| 支付与超时消费并发 | `cancelOrder()` 已有状态校验（仅 ORDERED/SERVED），支付先到则跳过超时，超时先到则支付校验失败 |
+
+### 11.6 application.yml 已有配置
+
+```yaml
+spring:
+  rabbitmq:
+    host: ${MQ_HOST:localhost}
+    port: ${MQ_PORT:5672}
+    username: ${MQ_USER:guest}
+    password: ${MQ_PWD:guest}
+    virtual-host: /
+    publisher-confirm-type: correlated   # 消息投递到交换机确认
+    publisher-returns: true              # 消息无法路由到队列时回调
+```
+
+### 11.7 订单状态机（更新）
+
+```
+ORDERED(0)
+  ├── 厨房点[完成] → SERVED(10)
+  │     ├── 顾客[确认结账] → PAID(20)
+  │     ├── 顾客[加菜] → ORDERED(0)（回退）
+  │     └── 管理员[撤销] → CANCELLED(90)
+  ├── 顾客[确认结账] → PAID(20)
+  ├── 管理员[撤销] → CANCELLED(90)
+  └── RabbitMQ超时30min → CANCELLED(90)  ← 新增
+```
