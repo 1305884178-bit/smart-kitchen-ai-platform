@@ -53,6 +53,7 @@ async function getSnapshot() {
 async function handleServe(orderId) {
   try {
     await request.post(`/api/kitchen-board/order/${orderId}/serve`)
+    orders.value = orders.value.filter(o => o.id !== orderId)
     ElMessage.success('出餐完成')
   } catch (e) {
     // 错误已在拦截器处理
@@ -63,7 +64,7 @@ async function handleServe(orderId) {
 function handleWsMessage(data) {
   if (data.type === 'NEW_ORDER') {
     orders.value.unshift(data.order)
-  } else if (data.type === 'ORDER_SERVED' || data.type === 'ORDER_PAID' || data.type === 'ORDER_CANCELLED') {
+  } else if (data.type === 'ORDER_SERVED' || data.type === 'ORDER_CANCELLED') {
     orders.value = orders.value.filter(o => o.id !== data.orderId)
   }
 }

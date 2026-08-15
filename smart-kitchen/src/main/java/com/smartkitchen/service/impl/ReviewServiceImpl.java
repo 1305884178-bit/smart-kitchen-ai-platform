@@ -36,6 +36,14 @@ public class ReviewServiceImpl extends ServiceImpl<ReviewMapper, Review> impleme
             throw new RuntimeException("只能对已结账的订单进行评价");
         }
 
+        // 校验是否已经评价过
+        Long exists = this.lambdaQuery()
+                .eq(Review::getOrderId, review.getOrderId())
+                .count();
+        if (exists > 0) {
+            throw new RuntimeException("该订单已经评价过，不能重复评价");
+        }
+
         review.setUserId(UserContext.getUserId());
         review.setCreateTime(LocalDateTime.now());
         this.save(review);
@@ -50,11 +58,14 @@ public class ReviewServiceImpl extends ServiceImpl<ReviewMapper, Review> impleme
         wrapper.orderByDesc("create_time");
         List<Review> reviews = this.list(wrapper);
 
-        // 批量查询关联订单，组装orderNo
+        // 批量查询关联订单，组装orderNo（无评价时直接返回空列表，避免 IN () 空参数报错）
         List<Long> orderIds = reviews.stream()
                 .map(Review::getOrderId)
                 .distinct()
                 .collect(Collectors.toList());
+        if (orderIds.isEmpty()) {
+            return new ArrayList<>();
+        }
         Map<Long, String> orderNoMap = orderService.listByIds(orderIds).stream()
                 .collect(Collectors.toMap(Order::getId, Order::getOrderNo));
 

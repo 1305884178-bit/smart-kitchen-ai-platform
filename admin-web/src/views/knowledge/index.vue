@@ -5,6 +5,20 @@
     <!-- 上传区 -->
     <el-card class="upload-card">
       <el-form :model="uploadForm" label-width="100px">
+        <el-form-item label="标题">
+          <el-input v-model="uploadForm.title" placeholder="请输入文档标题" />
+        </el-form-item>
+        <el-form-item label="上传文件">
+          <el-upload
+            :auto-upload="false"
+            :show-file-list="false"
+            accept=".docx,.pdf"
+            :on-change="handleFileChange"
+          >
+            <el-button>选择 Word/PDF 解析</el-button>
+          </el-upload>
+          <div style="color: #999; font-size: 12px; margin-top: 4px;">选择 .docx 或 .pdf 文件后自动解析内容到「文档内容」框</div>
+        </el-form-item>
         <el-form-item label="文档内容">
           <el-input v-model="uploadForm.content" type="textarea" :rows="5" placeholder="输入要上传的知识文档内容" />
         </el-form-item>
@@ -31,7 +45,7 @@
     <el-card class="list-card">
       <el-table :data="documents" stripe v-loading="loading">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="fileName" label="文件名" min-width="180" />
+        <el-table-column prop="title" label="标题" min-width="180" />
         <el-table-column prop="version" label="版本号" width="90" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
@@ -58,6 +72,7 @@ const loading = ref(false)
 const uploading = ref(false)
 
 const uploadForm = reactive({
+  title: '',
   content: '',
   version: '',
   status: 'draft',
@@ -73,11 +88,24 @@ async function loadDocuments() {
   finally { loading.value = false }
 }
 
+async function handleFileChange(file) {
+  const formData = new FormData()
+  formData.append('file', file.raw)
+  try {
+    const res = await request.post('/api/admin/knowledge/parse-file', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    uploadForm.content = res.data
+    ElMessage.success('文件解析成功，已填入文档内容')
+  } catch (e) {}
+}
+
 async function handleUpload() {
   if (!uploadForm.content.trim()) { ElMessage.warning('请输入文档内容'); return }
   uploading.value = true
   try {
     await request.post('/api/admin/knowledge/upload', {
+      title: uploadForm.title,
       content: uploadForm.content,
       version: uploadForm.version,
       status: uploadForm.status,
@@ -85,6 +113,7 @@ async function handleUpload() {
       metadata: {},
     })
     ElMessage.success('文档上传成功')
+    uploadForm.title = ''
     uploadForm.content = ''
     uploadForm.version = ''
     loadDocuments()

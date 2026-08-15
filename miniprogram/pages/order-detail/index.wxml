@@ -12,7 +12,7 @@
       <view class="order-info">
         <text>座位: {{order.seatNumber}}</text>
         <text>金额: ¥{{order.totalAmount}}</text>
-        <text>时间: {{_formatTime(order.createTime)}}</text>
+        <text>时间: {{createTimeFormatted}}</text>
       </view>
       <view wx:if="{{order.remark}}" class="remark-text">备注: {{order.remark}}</view>
     </view>
@@ -21,8 +21,11 @@
     <view class="card">
       <view class="section-title">菜品明细</view>
       <view class="order-item" wx:for="{{order.details}}" wx:key="id">
-        <text class="item-name">{{item.dishName}} x{{item.quantity}}</text>
-        <text class="item-price">¥{{item.price * item.quantity}}</text>
+        <text class="item-name">
+          {{item.dishName}} x{{item.quantity}}
+          <text wx:if="{{item.price === 0}}" class="off-shelf-tag">已下架</text>
+        </text>
+        <text class="item-price">{{item.price > 0 ? '¥' + item.price * item.quantity : ''}}</text>
         <text wx:if="{{item.isAdded}}" class="added-tag">加菜</text>
       </view>
     </view>

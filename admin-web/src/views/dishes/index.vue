@@ -35,17 +35,20 @@
           <template #default="{ row }">&yen;{{ row.price }}</template>
         </el-table-column>
         <el-table-column prop="dailyStock" label="日库存" width="80" />
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-switch
               :model-value="row.status === 1"
-              active-text="上架"
-              inactive-text="下架"
               @change="(val) => handleToggleStatus(row, val)"
             />
           </template>
         </el-table-column>
-        <el-table-column prop="ingredients" label="配料" min-width="160" />
+        <el-table-column label="配料" min-width="140">
+          <template #default="{ row }">{{ formatIngredients(row.ingredients) }}</template>
+        </el-table-column>
+        <el-table-column label="过敏原" min-width="120">
+          <template #default="{ row }">{{ formatIngredients(row.allergens) }}</template>
+        </el-table-column>
         <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="openDishDialog(row)">编辑</el-button>
@@ -76,7 +79,10 @@
           <el-input-number v-model="dishForm.alertThreshold" :min="0" />
         </el-form-item>
         <el-form-item label="配料" prop="ingredients">
-          <el-input v-model="dishForm.ingredients" type="textarea" :rows="3" placeholder="配料/过敏原信息" />
+          <el-input v-model="dishForm.ingredients" type="textarea" :rows="3" placeholder="用逗号或顿号分隔，如：猪肉、大葱、鸡蛋" />
+        </el-form-item>
+        <el-form-item label="过敏原" prop="allergens">
+          <el-input v-model="dishForm.allergens" type="textarea" :rows="2" placeholder="用逗号或顿号分隔，如：鸡蛋、小麦、大豆" />
         </el-form-item>
         <el-form-item label="新品初始库存" prop="newProductInitialStock">
           <el-input-number v-model="dishForm.newProductInitialStock" :min="0" />
@@ -86,8 +92,6 @@
             v-model="dishForm.status"
             :active-value="1"
             :inactive-value="0"
-            active-text="上架"
-            inactive-text="下架"
           />
         </el-form-item>
         <el-form-item label="菜品图片">
@@ -159,6 +163,7 @@ const dishForm = reactive({
   dailyStock: 0,
   alertThreshold: 0,
   ingredients: '',
+  allergens: '',
   newProductInitialStock: 0,
   status: 1,
   image: '',
@@ -203,6 +208,29 @@ function onUploadError() {
   ElMessage.warning('图片上传失败')
 }
 
+// 列表文本转 JSON 数组字符串（提交时用）
+function listTextToJson(text) {
+  const arr = String(text || '').split(/[,，、]/).map(s => s.trim()).filter(Boolean)
+  return JSON.stringify(arr)
+}
+
+// JSON 数组字符串转列表文本（展示/编辑时用）
+function jsonToListText(jsonStr) {
+  if (!jsonStr) return ''
+  try {
+    const arr = JSON.parse(jsonStr)
+    if (Array.isArray(arr)) return arr.join('、')
+  } catch (e) {}
+  return jsonStr
+}
+
+// 配料/过敏原格式化
+function formatIngredients(value) {
+  const text = jsonToListText(value)
+  if (!text || text === '[]' || text === 'null') return '[无]'
+  return text
+}
+
 // 分类名称映射
 function catName(categoryId) {
   const cat = categories.value.find(c => c.id === categoryId)
@@ -223,7 +251,7 @@ async function loadDishes() {
   try {
     const params = {}
     if (selectedCategoryId.value) params.categoryId = selectedCategoryId.value
-    const res = await request.get('/api/dish/list', { params })
+    const res = await request.get('/api/admin/dish/list', { params })
     dishes.value = res.data || []
   } catch (e) {}
   finally { loading.value = false }
@@ -240,7 +268,8 @@ function openDishDialog(row) {
       price: row.price,
       dailyStock: row.dailyStock,
       alertThreshold: row.alertThreshold,
-      ingredients: row.ingredients || '',
+      ingredients: jsonToListText(row.ingredients),
+      allergens: jsonToListText(row.allergens),
       newProductInitialStock: row.newProductInitialStock || 0,
       status: row.status,
       image: row.image || '',
@@ -250,7 +279,7 @@ function openDishDialog(row) {
     isEdit.value = false
     Object.assign(dishForm, {
       id: null, name: '', categoryId: null, price: 0,
-      dailyStock: 0, alertThreshold: 0, ingredients: '',
+      dailyStock: 0, alertThreshold: 0, ingredients: '', allergens: '',
       newProductInitialStock: 0, status: 1, image: '',
     })
     uploadFileList.value = []
@@ -265,7 +294,11 @@ async function submitDish() {
   if (!valid) return
   dishSubmitting.value = true
   try {
-    const payload = { ...dishForm }
+    const payload = {
+      ...dishForm,
+      ingredients: listTextToJson(dishForm.ingredients),
+      allergens: listTextToJson(dishForm.allergens),
+    }
     delete payload.id
     if (isEdit.value) {
       await request.put(`/api/admin/dish/update/${dishForm.id}`, payload)

@@ -51,6 +51,24 @@ def check_dish_inventory(dish_name: str) -> str:
         return f"查询库存时发生错误：{str(e)}"
 
 
+def _parse_json_list(value):
+    """
+    将接口返回的 JSON 数组字符串解析为 Python 列表。
+    兼容历史纯文本数据：解析失败或为空时返回 None，由调用方原样展示。
+    """
+    if not value or value == '[]':
+        return None
+    if isinstance(value, list):
+        return value or None
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, list) and parsed:
+            return parsed
+    except Exception:
+        pass
+    return None
+
+
 @tool
 def get_dish_ingredients(dish_name: str) -> str:
     """
@@ -70,15 +88,24 @@ def get_dish_ingredients(dish_name: str) -> str:
         result = data.get("data")
         if not result:
             return f"未找到名为 {dish_name} 的菜品。"
-        
-        ingredients_raw = result.get("ingredients")
-        if not ingredients_raw:
-            return f"{result['name']} 暂无详细配料信息。"
-        try:
-            ingredients = json.loads(ingredients_raw) if isinstance(ingredients_raw, str) else ingredients_raw
-            return f"{result['name']} 的配料信息：{', '.join(ingredients)}"
-        except Exception:
-            return f"{result['name']} 的配料信息：{ingredients_raw}"
+
+        name = result.get("name")
+        ingredients = _parse_json_list(result.get("ingredients"))
+        allergens = _parse_json_list(result.get("allergens"))
+
+        parts = []
+        if ingredients:
+            parts.append(f"配料：{'、'.join(ingredients)}")
+        elif result.get("ingredients") and result.get("ingredients") != '[]':
+            parts.append(f"配料：{result.get('ingredients')}")
+        if allergens:
+            parts.append(f"过敏原：{'、'.join(allergens)}")
+        elif result.get("allergens") and result.get("allergens") != '[]':
+            parts.append(f"过敏原：{result.get('allergens')}")
+
+        if not parts:
+            return f"{name} 暂无详细配料信息。"
+        return f"{name} 的配料信息：{'；'.join(parts)}"
     except requests.exceptions.Timeout:
         return f"查询 {dish_name} 配料超时，请稍后再试。"
     except requests.exceptions.ConnectionError:

@@ -15,6 +15,7 @@ Page({
   onShow() {
     this._loadSeats();
     this._loadCartItems();
+    this._loadAllDishesForCart();
   },
 
   /**
@@ -31,11 +32,41 @@ Page({
   },
 
   /**
-   * 加载购物车数据
+   * 加载购物车数据（原始数据）
    */
   _loadCartItems() {
     const items = cart.getCartItems();
-    const totalAmount = cart.getTotalAmount();
+    this.setData({ cartItems: items });
+  },
+
+  /**
+   * 加载全部在售菜品状态，用于校验购物车中已下架菜品
+   */
+  _loadAllDishesForCart() {
+    request.get('/api/dish/list', {}, { showError: false })
+      .then(dishes => {
+        const map = {};
+        (dishes || []).forEach(d => { map[d.id] = d.status; });
+        this.setData({ allDishStatusMap: map }, () => {
+          this._applyCartStatus();
+        });
+      });
+  },
+
+  /**
+   * 根据菜品状态重新计算购物车中每项的有效性和总金额
+   */
+  _applyCartStatus() {
+    const dishStatusMap = this.data.allDishStatusMap || {};
+    const items = this.data.cartItems.map(item => ({
+      ...item,
+      active: dishStatusMap[item.dishId] !== undefined ? dishStatusMap[item.dishId] === 1 : false
+    }));
+
+    const totalAmount = items
+      .filter(i => i.active)
+      .reduce((sum, i) => sum + i.price * i.quantity, 0);
+
     this.setData({ cartItems: items, totalAmount });
   },
 
@@ -67,7 +98,12 @@ Page({
   onSubmit() {
     const { selectedSeat, cartItems, remark } = this.data;
     if (!selectedSeat) {
-      wx.showToast({ title: '请选择座位', icon: 'none' });
+      wx.showModal({
+        title: '提示',
+        content: '请先选择座位号',
+        showCancel: false,
+        confirmText: '知道了'
+      });
       return;
     }
     if (cartItems.length === 0) {

@@ -11,6 +11,7 @@ import com.smartkitchen.mapper.StockLogMapper;
 import com.smartkitchen.service.DishService;
 import com.smartkitchen.service.StockLogService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,11 @@ public class StockLogServiceImpl extends ServiceImpl<StockLogMapper, StockLog> i
 
     @Autowired
     private DishService dishService;
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+
+    private static final String STOCK_PREFIX = "dish:stock:";
 
     @Override
     public StockVO getStockView(Long dishId) {
@@ -67,5 +73,8 @@ public class StockLogServiceImpl extends ServiceImpl<StockLogMapper, StockLog> i
         log.setAfterQty(afterQty);
         log.setCreateTime(LocalDateTime.now());
         this.save(log);
+
+        // 删除Redis缓存，下次下单时从DB重新加载最新库存
+        stringRedisTemplate.delete(STOCK_PREFIX + dishId);
     }
 }

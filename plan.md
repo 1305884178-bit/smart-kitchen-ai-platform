@@ -78,10 +78,10 @@
   - 挂载 3 个工具函数：`search_dish_by_preference` (RAG语义推荐)、`check_dish_inventory` (MySQL实时库存查询)、`get_dish_ingredients` (配料/过敏原查询)。
   - 暴露 `/ai/chat` SSE 流式接口，首字响应 < 1s，前端实时展示 AI 回答。
   - 实现问答结果 Redis 全量热点缓存（TTL 10分钟），降低 LLM 成本。
-- [x] **Step 4: AI 备菜预测（LangGraph Supervisor + 子图）**
-  - [x] 架构：Supervisor 多智能体入口 → 根据 task\_type 路由到备菜预测子图（predict\_agent），未知类型走 other\_node 兜底返回不支持提示
+- [x] **Step 4: AI 备菜预测（LangGraph 多节点工作流）**
+  - [x] 架构：单图多节点工作流（predict_agent），由触发接口/定时任务直接调用预测子图，无需 Supervisor 路由层
   - [x] 预测子图 7 个节点：get\_sales\_30d、get\_tomorrow\_weather、get\_holiday\_info、get\_recent\_reviews、time\_series\_predict、llm\_adjust、save\_result
-  - [x] LLM Prompt 外置到 `app/prompts/predict_llm_prompt.txt`，Supervisor 路由提示词外置到 `app/prompts/supervisor_prompt.txt`
+  - [x] LLM Prompt 外置到 `app/prompts/predict_llm_prompt.txt`
   - [x] 使用 **MCP 协议** 调用天气和节假日外部 API（天气: OpenWeatherMap 5日预报/3小时间隔聚合为日级数据; 节假日: ModelScope `china-festival-mcp` 通过 JSON-RPC 调用）
   - [x] **完善降级策略**：外部 API 不可用时跳过；LLM 超时或 JSON 格式错误时降级为时序预测；冷启动（新菜品/新店无历史数据）逐级降级：同类菜品均值 → 新品初始库存 → 日常库存 → 绝对兜底
   - [x] 实现触发机制：定时任务（Cron 每日 02:00 触发）与管理员手动触发

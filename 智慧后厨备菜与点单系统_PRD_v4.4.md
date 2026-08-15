@@ -14,8 +14,8 @@
 | v4.2 | 2026-07-18 | 细化第5章接口清单：Java端按模块拆分为11个子模块表格（含方法/路径/参数/响应/角色），Python端扩展为3个子模块表格；新增分类管理接口（/api/admin/dish/category）、预测确认接口；WebSocket事件模型独立小节 |
 | v4.3 | 2026-07-18 | 新增 6.6 节「代码分层规范」，明确 Controller/Service/Mapper 各层职责边界与 DTO 转换规则 |
 | v4.4 | 2026-07-19 | 优化接口规范：写操作（如分类的增/删/改）不再返回冗余的 Boolean 数据，统一返回无 data 的 Result.success() |
-| v4.5 | 2026-07-30 | **架构升级**：LangGraph 备菜预测从单图升级为 Supervisor + 子图模式；LLM Prompt 外置到 app/prompts/；新增 supervisor.py 多智能体调度入口 |
 | v4.6 | 2026-08-02 | Phase 6 前端范围补充：B端新增仪表盘首页（今日订单/营收/待出餐/库存预警统计卡片）；C端新增菜品详情页（大图/配料/过敏原/已有评价）；完善订单详情页状态刷新方案（WebSocket优先+轮询降级） |
+| v4.7 | 2026-08-13 | **架构简化**：LangGraph 备菜预测移除 Supervisor 路由层（supervisor.py / supervisor_prompt.txt），改为单一多节点工作流 predict_subgraph，由触发接口/定时任务直接调用 |
 
 ---
 
@@ -272,55 +272,50 @@ ORDERED（已下单）
 
 ---
 
-### 模块 3：AI 智能备菜预测系统（LangGraph Supervisor + 预测子图）
+### 模块 3：AI 智能备菜预测系统（LangGraph 多节点工作流）
 
-**技术选型**：LangGraph Supervisor 模式（**Supervisor 路由 + 独立子图**，可扩展多智能体）。
+**技术选型**：LangGraph 多节点工作流（单一预测子图 predict_subgraph）。
 
-> Supervisor 作为多智能体调度入口，根据 `task_type` 条件路由到不同的子图。当前仅注册备菜预测子图（predict_subgraph），未来可扩展库存预警、排班建议等子图。预测子图内部为顺序流水线，仅 `llm_adjust` 一个节点调用 LLM，其余节点均为确定性 Python 函数。天气和节假日数据通过 **MCP（Model Context Protocol）** 调用外部 API。LLM Prompt 外置到 `app/prompts/predict_llm_prompt.txt`。这样做的好处：成本可控（仅 1 次 LLM 调用）、时延低、排查简单。如未来数据维度增多，可在图中扩展新节点而不需重构。
+> 备菜预测为单一多节点工作流，由触发接口或定时任务直接调用 predict_subgraph。预测子图内部为顺序流水线，仅 `llm_adjust` 一个节点调用 LLM，其余节点均为确定性 Python 函数。天气和节假日数据通过 **MCP（Model Context Protocol）** 调用外部 API。LLM Prompt 外置到 `app/prompts/predict_llm_prompt.txt`。这样做的好处：成本可控（仅 1 次 LLM 调用）、时延低、排查简单。如未来数据维度增多，可在图中扩展新节点而不需重构。
 
-#### 3.1 Supervisor 架构与预测子图
+#### 3.1 预测工作流
 
 ```
-Supervisor Graph
+predict_subgraph（备菜预测工作流）
   │
-  ├── supervisor_node ── 条件路由（task_type="predict"）
+  ▼
+[get_sales_30d]      拉取各菜品过去30天日销量
   │
-  └── predict_subgraph（备菜预测子图）
-        │
-        ▼
-      [get_sales_30d]      拉取各菜品过去30天日销量
-        │
-        ▼
-      [get_tomorrow_weather] 调用第三方API获取明日天气
-        │
-        ▼
-      [get_holiday_info]     判断明日是否节假日/周末
-        │
-        ▼
-      [get_recent_reviews]   拉取各菜品近30天平均评分与差评率
-        │
-        ▼
-      [time_series_predict] ── 加权移动平均计算每道菜「基础预测量」
-        │
-        ▼
-      [llm_adjust] ── 组装Prompt（基础预测 + 天气 + 节日 + 评价）→ 调大模型 → 输出JSON
-        │
-        ▼
-      [save_result] ── 写入 ai_prediction_record 表
+  ▼
+[get_tomorrow_weather] 调用第三方API获取明日天气
+  │
+  ▼
+[get_holiday_info]     判断明日是否节假日/周末
+  │
+  ▼
+[get_recent_reviews]   拉取各菜品近30天平均评分与差评率
+  │
+  ▼
+[time_series_predict] ── 加权移动平均计算每道菜「基础预测量」
+  │
+  ▼
+[llm_adjust] ── 组装Prompt（基础预测 + 天气 + 节日 + 评价）→ 调大模型 → 输出JSON
+  │
+  ▼
+[save_result] ── 写入 ai_prediction_record 表
 ```
 
 #### 3.2 节点说明
 
-| 节点 | 所属 | 类型 | 说明 |
-|------|------|------|------|
-| `supervisor_node` | Supervisor | Python函数 | 根据 `task_type` 路由到对应子图 |
-| `get_sales_30d` | 预测子图 | Python函数 | 查 MySQL 汇总近30天各菜日销量 |
-| `get_tomorrow_weather` | 预测子图 | Python函数（MCP） | 通过 MCP 调第三方天气 API |
-| `get_holiday_info` | 预测子图 | Python函数（MCP） | 通过 MCP 判断节假日/周末 |
-| `get_recent_reviews` | 预测子图 | Python函数 | 查 MySQL 汇总近30天各菜评分均值 |
-| `time_series_predict` | 预测子图 | Python函数 | 加权移动平均（WMA） |
-| `llm_adjust` | 预测子图 | LLM调用 | Prompt工程，大模型微调基础预测 |
-| `save_result` | 预测子图 | Python函数 | 写入DB |
+| 节点 | 类型 | 说明 |
+|------|------|------|
+| `get_sales_30d` | Python函数 | 查 MySQL 汇总近30天各菜日销量 |
+| `get_tomorrow_weather` | Python函数（MCP） | 通过 MCP 调第三方天气 API |
+| `get_holiday_info` | Python函数（MCP） | 通过 MCP 判断节假日/周末 |
+| `get_recent_reviews` | Python函数 | 查 MySQL 汇总近30天各菜评分均值 |
+| `time_series_predict` | Python函数 | 加权移动平均（WMA） |
+| `llm_adjust` | LLM调用 | Prompt工程，大模型微调基础预测 |
+| `save_result` | Python函数 | 写入DB |
 
 #### 3.3 降级策略
 
@@ -630,7 +625,7 @@ data: { content, toolCalls }` | Agent + Function Calling 流式对话，支持�
 
 | 方法 | 路径 | 请求参数 | 响应 | 说明 |
 |------|------|----------|------|------|
-| POST | `/ai/predict/trigger` | Body: `{ targetDate }` | `{ code:200, data: { taskId, status: "running" } }` | 触发LangGraph预测流程：supervisor→数据节点并行→时序预测→LLM修正→落库。支持Cron自动（每日02:00）和管理员手动触发 |
+| POST | `/ai/predict/trigger` | Body: `{ targetDate }` | `{ code:200, data: { taskId, status: "running" } }` | 触发LangGraph预测流程：数据节点并行→时序预测→LLM修正→落库。支持Cron自动（每日02:00）和管理员手动触发 |
 | GET | `/ai/predict/result` | Query: `?date=2026-07-18` | `{ code:200, data: [{ dishId, dishName, baseQuantity, aiSuggestQuantity, finalQuantity, reasoning, confidence, recentAvgScore, status }] }` | 查询指定日期的预测结果列表；confidence<0.4标记低置信度 |
 | PUT | `/ai/predict/confirm` | Body: `{ predictDate, dishId, finalQuantity, confirmedBy }` | `{ code:200, data: { status: "confirmed" } }` | 管理员确认/覆盖预测数量，记录confirmed_by |
 

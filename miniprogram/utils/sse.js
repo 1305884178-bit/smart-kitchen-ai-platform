@@ -14,7 +14,7 @@
  *   // 如需取消：sse.abort();
  */
 const app = getApp();
-const BASE_URL = app?.globalData?.apiBase || 'http://localhost:8080';
+const DEFAULT_BASE_URL = app?.globalData?.apiBase || 'http://localhost:8080';
 
 /**
  * 检查是否支持 enableChunked（基础库 >= 2.20.1）
@@ -51,6 +51,7 @@ function createSSE(config) {
   let aborted = false;
   let requestTask = null;
   let buffer = '';
+  const baseUrl = config.baseUrl || DEFAULT_BASE_URL;
 
   if (!config.url || !config.onMessage) {
     throw new Error('SSE: url 和 onMessage 为必填参数');
@@ -69,7 +70,7 @@ function createSSE(config) {
   if (_supportChunked()) {
     // 使用 enableChunked 流式接收
     requestTask = wx.request({
-      url: `${BASE_URL}${config.url}`,
+      url: `${baseUrl}${config.url}`,
       method: 'POST',
       data: config.data || {},
       header: headers,
@@ -116,7 +117,7 @@ function createSSE(config) {
   } else {
     // 降级：普通 POST 请求，等待完整响应
     wx.request({
-      url: `${BASE_URL}${config.url}`,
+      url: `${baseUrl}${config.url}`,
       method: 'POST',
       data: config.data || {},
       header: headers,

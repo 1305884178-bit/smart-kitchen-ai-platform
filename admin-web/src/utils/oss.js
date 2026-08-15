@@ -1,34 +1,16 @@
-import OSS from 'ali-oss'
 import request from './request'
 
-let stsCache = null
-let stsExpireTime = 0
-
-async function getStsToken() {
-  if (stsCache && Date.now() < stsExpireTime) {
-    return stsCache
-  }
-  const res = await request.get('/api/admin/upload/sts-token')
-  const data = res.data
-  if (data.status !== 'success') {
-    throw new Error(data.message || '获取上传凭证失败')
-  }
-  stsCache = data
-  stsExpireTime = Date.now() + 3500 * 1000
-  return data
-}
-
+/**
+ * 上传图片到 OSS（通过后端代理，避免前端直传跨域问题）
+ * @param {File} file 图片文件
+ * @returns {Promise<string>} 图片公网访问 URL
+ */
 export async function uploadToOss(file) {
-  const sts = await getStsToken()
-  const client = new OSS({
-    region: sts.region,
-    accessKeyId: sts.accessKeyId,
-    accessKeySecret: sts.accessKeySecret,
-    stsToken: sts.securityToken,
-    bucket: sts.bucket,
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const res = await request.post('/api/admin/upload/image', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
   })
-  const ext = file.name.substring(file.name.lastIndexOf('.'))
-  const objectName = `dishes/${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`
-  const result = await client.put(objectName, file)
-  return result.url
+  return res.data
 }

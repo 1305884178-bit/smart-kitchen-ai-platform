@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS `oms_order` (
   `complete_time` datetime DEFAULT NULL COMMENT '厨房完成时间',
   `operator_id` bigint DEFAULT NULL COMMENT '最后操作管理员',
   `remark` varchar(256) DEFAULT NULL COMMENT '顾客备注',
+  `parent_order_id` bigint DEFAULT NULL COMMENT '父订单ID（加菜子订单指向原订单）',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下单时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
   PRIMARY KEY (`id`),
@@ -76,6 +77,7 @@ CREATE TABLE IF NOT EXISTS `pms_dish` (
   `daily_stock` int NOT NULL DEFAULT '0' COMMENT '每日库存',
   `alert_threshold` int NOT NULL DEFAULT '0' COMMENT '预警阈值',
   `ingredients` text COMMENT '配料JSON数组',
+  `allergens` text COMMENT '过敏原JSON数组',
   `new_product_initial_stock` int DEFAULT '0' COMMENT '新品初始库存',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -113,8 +115,7 @@ CREATE TABLE IF NOT EXISTS `ai_prediction_record` (
 -- 7. RAG文档元数据表
 CREATE TABLE IF NOT EXISTS `ai_knowledge_document` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增',
-  `file_name` varchar(128) NOT NULL COMMENT '原始文件名',
-  `file_url` varchar(256) NOT NULL COMMENT '文件路径',
+  `title` varchar(128) NOT NULL COMMENT '文档标题',
   `chunk_count` int NOT NULL DEFAULT '0' COMMENT '分块数',
   `version` int NOT NULL DEFAULT '1' COMMENT '版本号',
   `status` varchar(16) NOT NULL DEFAULT 'draft' COMMENT 'draft/active/archived',

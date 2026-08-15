@@ -1,7 +1,9 @@
+import uuid
+
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from app.services.predict_service import trigger_prediction, get_prediction_results, confirm_prediction
+from app.services.predict_service import trigger_prediction, get_prediction_results, confirm_prediction, get_task_status
 
 router = APIRouter(prefix="/ai/predict", tags=["Predict"])
 
@@ -16,14 +18,20 @@ class ConfirmRequest(BaseModel):
 
 @router.post("/trigger")
 async def trigger_prediction_api(request: TriggerRequest, background_tasks: BackgroundTasks):
-    """手动触发备菜预测"""
-    # 由于预测可能需要时间，放入后台任务或直接异步执行。这里直接执行，前端可以等或者做成异步任务。
-    # 为了防止接口超时，可以放入 background_tasks，但根据需求如果是批量这里可能会慢
-    # 这里直接 await
-    result = await trigger_prediction(request.target_date, request.dish_id)
-    if result["status"] == "error":
-        raise HTTPException(status_code=400, detail=result["message"])
-    return result
+    """手动触发备菜预测（异步执行，立即返回任务ID）"""
+    # 预测流程涉及多道菜品的 LLM 与 MCP 调用，耗时较长；
+    # 交给后台任务异步执行，接口立即返回，避免调用方（Java 代理）读超时。
+    task_id = uuid.uuid4().hex
+    background_tasks.add_task(trigger_prediction, request.target_date, request.dish_id, task_id)
+    return {"task_id": task_id, "status": "running"}
+
+@router.get("/status")
+async def get_prediction_status_api(task_id: str):
+    """查询预测任务状态"""
+    status = get_task_status(task_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Task not found or expired")
+    return {"code": 200, "data": status}
 
 @router.get("/result")
 async def get_prediction_results_api(target_date: str):

@@ -52,6 +52,17 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
     }
 
     /**
+     * 管理端查询所有菜品（含已下架）
+     */
+    @Override
+    public List<Dish> listAll(Long categoryId) {
+        LambdaQueryWrapper<Dish> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(categoryId != null, Dish::getCategoryId, categoryId);
+        queryWrapper.orderByDesc(Dish::getUpdateTime);
+        return this.list(queryWrapper);
+    }
+
+    /**
      * 根据菜品ID查询菜品详情（含分类名与已有评价）
      * @param dishId 菜品ID
      * @return 菜品详情VO，未找到返回null
@@ -73,6 +84,7 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
         vo.setDailyStock(dish.getDailyStock());
         vo.setAlertThreshold(dish.getAlertThreshold());
         vo.setIngredients(dish.getIngredients());
+        vo.setAllergens(dish.getAllergens());
         vo.setCreateTime(dish.getCreateTime());
         vo.setUpdateTime(dish.getUpdateTime());
 
@@ -144,6 +156,7 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
         DishIngredientVO vo = new DishIngredientVO();
         vo.setName(dish.getName());
         vo.setIngredients(dish.getIngredients());
+        vo.setAllergens(dish.getAllergens());
         return vo;
     }
 

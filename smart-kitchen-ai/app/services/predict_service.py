@@ -1,14 +1,39 @@
 import asyncio
+import json
 import logging
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
-from app.agents.supervisor import supervisor
+from app.agents.predict_agent import predict_subgraph
 from app.db.mysql_client import get_db_connection
+from app.db.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
-async def trigger_prediction(target_date: Optional[str] = None, dish_id: Optional[int] = None) -> Dict:
-    """触发预测任务"""
+TASK_KEY_PREFIX = "predict:task:"
+TASK_TTL_SECONDS = 3600
+
+
+def _set_task_status(task_id: str, status: Dict) -> None:
+    """将预测任务状态写入 Redis（1小时过期）"""
+    try:
+        redis_client.set(f"{TASK_KEY_PREFIX}{task_id}", json.dumps(status), ex=TASK_TTL_SECONDS)
+    except Exception as e:
+        logger.error(f"Error setting task status: {e}")
+
+
+def get_task_status(task_id: str) -> Optional[Dict]:
+    """从 Redis 读取预测任务状态"""
+    try:
+        raw = redis_client.get(f"{TASK_KEY_PREFIX}{task_id}")
+        if raw:
+            return json.loads(raw)
+    except Exception as e:
+        logger.error(f"Error getting task status: {e}")
+    return None
+
+
+async def trigger_prediction(target_date: Optional[str] = None, dish_id: Optional[int] = None, task_id: Optional[str] = None) -> Dict:
+    """触发预测任务，task_id 存在时同步更新任务进度"""
     if not target_date:
         target_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         
@@ -30,29 +55,57 @@ async def trigger_prediction(target_date: Optional[str] = None, dish_id: Optiona
         conn.close()
 
     if not dishes:
+        if task_id:
+            _set_task_status(task_id, {"status": "error", "total": 0, "done": 0, "message": "没有找到可预测的在售菜品"})
         return {"status": "error", "message": "No active dishes found for prediction."}
 
     logger.info(f"Triggering prediction for {len(dishes)} dishes on {target_date}")
-    
-    # 异步并发执行预测（通过 Supervisor 路由到预测子图）
-    tasks = []
-    for d_id in dishes:
-        state = {
-            "task_type": "predict",
-            "predict_date": target_date,
-            "dish_id": d_id
-        }
-        tasks.append(supervisor.ainvoke(state))
-        
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    total = len(dishes)
+    if task_id:
+        _set_task_status(task_id, {"status": "running", "total": total, "done": 0, "message": f"正在预测 {total} 道菜品..."})
+
+    done_count = 0
+
+    async def run_one(d_id: int):
+        """执行单道菜品预测并在完成后推进进度"""
+        nonlocal done_count
+        try:
+            state = {
+                "predict_date": target_date,
+                "dish_id": d_id
+            }
+            return await predict_subgraph.ainvoke(state)
+        finally:
+            done_count += 1
+            if task_id:
+                _set_task_status(task_id, {
+                    "status": "running",
+                    "total": total,
+                    "done": done_count,
+                    "message": f"已完成 {done_count}/{total} 道菜品"
+                })
+
+    # 异步并发执行预测（直接调用预测子图）
+    results = await asyncio.gather(*(run_one(d) for d in dishes), return_exceptions=True)
     
     success_count = sum(1 for r in results if not isinstance(r, Exception))
-    
+    failed_count = total - success_count
+
+    if task_id:
+        _set_task_status(task_id, {
+            "status": "success" if failed_count == 0 else "error",
+            "total": total,
+            "done": total,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "message": f"预测完成：成功 {success_count} 道，失败 {failed_count} 道"
+        })
+
     return {
         "status": "success", 
-        "message": f"Triggered prediction for {len(dishes)} dishes.",
+        "message": f"Triggered prediction for {total} dishes.",
         "success_count": success_count,
-        "failed_count": len(dishes) - success_count
+        "failed_count": failed_count
     }
 
 def get_prediction_results(target_date: str) -> List[Dict]:

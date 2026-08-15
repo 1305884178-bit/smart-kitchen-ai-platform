@@ -19,8 +19,8 @@ class Settings:
     milvus_port = os.getenv("MILVUS_PORT", "19530")
 
     llm_api_key = os.getenv("LLM_API_KEY", "")
-    llm_base_url = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
-    llm_model = os.getenv("LLM_MODEL", "gpt-4o")
+    llm_base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
+    llm_model = os.getenv("LLM_MODEL", "deepseek-v4-pro")
 
     embedding_api_key = os.getenv("EMBEDDING_API_KEY", "")
     embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://api.openai.com/v1")

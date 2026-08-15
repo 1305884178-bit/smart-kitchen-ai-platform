@@ -9,4 +9,5 @@ import lombok.Data;
 public class DishIngredientVO {
     private String name;
     private String ingredients;
+    private String allergens;
 }

@@ -10,6 +10,7 @@ import java.util.Map;
 @Data
 public class KnowledgeUploadDTO {
     private String content;
+    private String title;
     private Map<String, Object> metadata;
     private String version;
     private String status;

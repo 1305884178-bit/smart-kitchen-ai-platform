@@ -52,6 +52,6 @@ public class AuthControllerIntegrationTest {
                 .content(objectMapper.writeValueAsString(loginDTO)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(500))
-                .andExpect(jsonPath("$.message").value("服务器内部错误: 账号或密码错误"));
+                .andExpect(jsonPath("$.message").value("账号或密码错误"));
     }
 }

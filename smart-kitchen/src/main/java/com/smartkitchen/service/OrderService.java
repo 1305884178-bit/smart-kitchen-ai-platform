@@ -44,8 +44,8 @@ public interface OrderService extends IService<Order> {
     void serveOrder(Long orderId);
 
     /**
-     * 加菜：扣库存 + 追加明细 + SERVED→ORDERED状态回退
-     * @param orderId 订单ID
+     * 加菜：创建新的子订单（相同座位号、独立厨房看板卡片），扣库存
+     * @param orderId 原订单ID（父订单）
      * @param addDishDTO 加菜菜品列表
      */
     void addDish(Long orderId, AddDishDTO addDishDTO);
@@ -64,6 +64,13 @@ public interface OrderService extends IService<Order> {
      * @return 订单详情
      */
     OrderDetailVO getUserOrderDetail(Long orderId);
+
+    /**
+     * 管理端订单详情（不限userId，含availableActions）
+     * @param orderId 订单ID
+     * @return 订单详情
+     */
+    OrderDetailVO getAdminOrderDetail(Long orderId);
 
     /**
      * 管理端全量订单分页查询

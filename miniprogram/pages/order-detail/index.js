@@ -1,12 +1,12 @@
 // pages/order-detail/index.js
 const request = require('../../utils/request');
 
-// 订单状态映射
+// 订单状态映射（与后端 OrderStatusEnum 一致）
 const STATUS_MAP = {
   0: '已下单',
-  1: '已出餐',
-  2: '已结账',
-  3: '已取消'
+  10: '已上菜',
+  20: '已结账',
+  90: '已取消'
 };
 
 // 状态对应可操作按钮
@@ -23,7 +23,8 @@ Page({
     statusText: '',
     actions: [],
     orderId: null,
-    pollingTimer: null
+    pollingTimer: null,
+    createTimeFormatted: ''
   },
 
   onLoad(options) {
@@ -60,7 +61,8 @@ Page({
           label: this._getActionLabel(a),
           type: a
         }));
-        this.setData({ order, statusText, actions, loading: false });
+        const createTimeFormatted = this._formatTime(order.createTime);
+        this.setData({ order, statusText, actions, loading: false, createTimeFormatted });
       })
       .catch(() => {
         this.setData({ loading: false });
@@ -88,7 +90,9 @@ Page({
 
     switch (action) {
       case 'ADD_DISH':
-        wx.navigateTo({ url: `/pages/menu/index?addToOrderId=${orderId}` });
+        getApp().globalData.addToOrderId = orderId;
+        getApp().globalData.addToSeatNumber = this.data.order?.seatNumber || '';
+        wx.switchTab({ url: '/pages/menu/index' });
         break;
       case 'PAY':
         this._onPay();

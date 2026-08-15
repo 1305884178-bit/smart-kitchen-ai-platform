@@ -60,10 +60,16 @@ Page({
 
     // 创建 SSE 连接接收流式回复
     this._sse = createSSE({
+      baseUrl: getApp().globalData.aiBase || 'http://localhost:8000',
       url: '/ai/chat',
-      data: { question },
+      data: { message: question },
       onMessage: (chunk) => {
-        fullContent += chunk;
+        let content = chunk;
+        try {
+          const parsed = JSON.parse(chunk);
+          content = parsed.content || chunk;
+        } catch (e) {}
+        fullContent += content;
         messages[aiMsgIndex] = {
           role: 'assistant',
           content: fullContent

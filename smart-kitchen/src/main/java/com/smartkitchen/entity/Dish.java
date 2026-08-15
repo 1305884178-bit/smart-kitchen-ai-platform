@@ -24,6 +24,7 @@ public class Dish {
     private Integer dailyStock;
     private Integer alertThreshold;
     private String ingredients;
+    private String allergens;
     private Integer newProductInitialStock;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

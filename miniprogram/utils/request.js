@@ -56,7 +56,8 @@ function request(url, options = {}) {
           if (showError) {
             wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' });
           }
-          // 跳转到登录流程（由调用方按需处理）
+          // 自动触发登录流程：老用户静默换 token，新用户跳转注册页
+          app.checkLogin();
           reject({ code: 401, message: 'Unauthorized' });
           return;
         }

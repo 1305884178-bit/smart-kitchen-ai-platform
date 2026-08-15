@@ -67,6 +67,21 @@ public class PythonAIServiceImpl implements PythonAIService {
     }
 
     /**
+     * 查询预测任务状态（代理调用 Python /ai/predict/status）
+     * @param taskId 任务ID
+     * @return Python返回结果
+     */
+    @Override
+    public Map<String, Object> getPredictionStatus(String taskId) {
+        String url = pythonServiceUrl + "/ai/predict/status?task_id=" + taskId;
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                url, HttpMethod.GET, null,
+                new ParameterizedTypeReference<Map<String, Object>>() {}
+        );
+        return response.getBody();
+    }
+
+    /**
      * 确认/覆盖预测量（代理调用 Python /ai/predict/confirm）
      * @param dto 包含recordId、finalQuantity、confirmedBy
      * @return Python返回结果

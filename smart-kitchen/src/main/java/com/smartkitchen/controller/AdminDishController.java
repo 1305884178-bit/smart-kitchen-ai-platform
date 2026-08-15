@@ -6,6 +6,8 @@ import com.smartkitchen.service.DishService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 /**
  * 管理端菜品管理控制器
  */
@@ -15,6 +17,17 @@ public class AdminDishController {
 
     @Autowired
     private DishService dishService;
+
+    /**
+     * 查询所有菜品（含已下架）
+     * @param categoryId 分类ID，可选
+     * @return 返回菜品列表
+     */
+    @GetMapping("/list")
+    public Result<List<Dish>> listAll(@RequestParam(required = false) Long categoryId) {
+        List<Dish> dishList = dishService.listAll(categoryId);
+        return Result.success(dishList);
+    }
 
     /**
      * 新增菜品

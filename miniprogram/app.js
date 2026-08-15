@@ -116,6 +116,7 @@ App({
 
   globalData: {
     apiBase: 'http://localhost:8080',
+    aiBase: 'http://localhost:8000',
     wsBase: 'ws://localhost:8080',
     isLoggedIn: false,
     userId: null,

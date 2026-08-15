@@ -21,6 +21,7 @@ public class DishDetailVO {
     private Integer dailyStock;
     private Integer alertThreshold;
     private String ingredients;
+    private String allergens;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
     private List<ReviewItem> reviews;

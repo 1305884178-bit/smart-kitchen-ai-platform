@@ -21,6 +21,13 @@ public interface DishService extends IService<Dish> {
     List<Dish> listByCategoryId(Long categoryId);
 
     /**
+     * 管理端查询所有菜品（含已下架）
+     * @param categoryId 分类ID，可选
+     * @return 菜品列表
+     */
+    List<Dish> listAll(Long categoryId);
+
+    /**
      * 根据菜品ID查询菜品详情（含分类名与已有评价）
      * @param dishId 菜品ID
      * @return 菜品详情VO，未找到返回null

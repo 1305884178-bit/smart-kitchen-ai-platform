@@ -31,8 +31,8 @@ public class OrderController {
     }
 
     /**
-     * 订单加菜（追加明细、扣库存、若当前状态为SERVED则回退到ORDERED）
-     * @param id 订单ID
+     * 订单加菜（创建新的子订单，相同座位号，独立厨房看板卡片）
+     * @param id 原订单ID（父订单）
      * @param addDishDTO 加菜菜品列表
      * @return 返回加菜结果
      */
@@ -92,6 +92,17 @@ public class OrderController {
                                             @RequestParam(required = false) String seatNumber) {
         Page<OrderVO> result = orderService.listAdminOrders(page, size, status, seatNumber);
         return Result.success(result);
+    }
+
+    /**
+     * 管理端查询订单详情（不限userId）
+     * @param id 订单ID
+     * @return 返回订单详细信息
+     */
+    @GetMapping("/admin-detail/{id}")
+    public Result<OrderDetailVO> adminDetail(@PathVariable("id") Long id) {
+        OrderDetailVO vo = orderService.getAdminOrderDetail(id);
+        return Result.success(vo);
     }
 
     /**

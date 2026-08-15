@@ -13,6 +13,14 @@
           <el-button :loading="loadingResult" @click="loadResult">查询结果</el-button>
         </el-form-item>
       </el-form>
+      <el-alert
+        v-if="predicting"
+        :title="predictProgress || '预测任务执行中…'"
+        type="info"
+        show-icon
+        :closable="false"
+        class="predict-tip"
+      />
     </el-card>
 
     <!-- 结果表格 -->
@@ -55,7 +63,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onUnmounted } from 'vue'
 import request from '@/utils/request'
 import { ElMessage } from 'element-plus'
 
@@ -63,6 +71,11 @@ const predictDate = ref('')
 const triggering = ref(false)
 const loadingResult = ref(false)
 const results = ref([])
+
+// 预测进度
+const predicting = ref(false)
+const predictProgress = ref('')
+let pollTimer = null
 
 // 确认弹窗
 const confirmVisible = ref(false)
@@ -74,11 +87,70 @@ async function triggerPredict() {
   if (!predictDate.value) { ElMessage.warning('请选择预测日期'); return }
   triggering.value = true
   try {
-    await request.post('/api/admin/predict/trigger', { targetDate: predictDate.value })
-    ElMessage.success('预测任务已触发')
+    const res = await request.post('/api/admin/predict/trigger', { targetDate: predictDate.value })
+    const taskId = res.data?.task_id
+    if (!taskId) {
+      ElMessage.warning('未获取到任务ID，请稍后手动查询结果')
+      return
+    }
+    ElMessage.success('预测任务已触发，正在自动刷新结果…')
+    startPolling(taskId)
   } catch (e) {}
   finally { triggering.value = false }
 }
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function startPolling(taskId) {
+  stopPolling()
+  predicting.value = true
+  predictProgress.value = '预测任务执行中，正在等待结果…'
+
+  let elapsed = 0
+  const INTERVAL_MS = 3000
+  const MAX_POLL_MS = 120000
+
+  pollTimer = setInterval(async () => {
+    if (!pollTimer) return
+    elapsed += INTERVAL_MS
+    if (elapsed > MAX_POLL_MS) {
+      stopPolling()
+      predicting.value = false
+      ElMessage.warning('预测耗时较长，请稍后手动点击“查询结果”查看')
+      return
+    }
+    try {
+      const statusRes = await request.get('/api/admin/predict/status', { params: { taskId } })
+      const status = statusRes.data?.data || statusRes.data
+      if (!status) return
+
+      if (status.status === 'running') {
+        predictProgress.value = status.done !== undefined && status.total
+          ? `预测中：已完成 ${status.done}/${status.total} 道菜品`
+          : (status.message || '预测任务执行中…')
+        return
+      }
+
+      stopPolling()
+      if (status.status === 'success') {
+        ElMessage.success(status.message || '预测完成')
+      } else {
+        ElMessage.warning(status.message || '预测结束，部分菜品可能失败')
+      }
+      await loadResult()
+      predicting.value = false
+    } catch (e) {
+      // 状态查询失败时继续轮询，避免中断体验
+    }
+  }, INTERVAL_MS)
+}
+
+onUnmounted(stopPolling)
 
 async function loadResult() {
   if (!predictDate.value) { ElMessage.warning('请选择预测日期'); return }
@@ -89,7 +161,15 @@ async function loadResult() {
     })
     // Python 返回的数据可能在 data.results 或 data 中
     const data = res.data
-    results.value = Array.isArray(data) ? data : (data?.results || data?.data || [])
+    const list = Array.isArray(data) ? data : (data?.results || data?.data || [])
+    // Python 返回 snake_case 字段，映射为前端表格使用的 camelCase
+    results.value = list.map(item => ({
+      ...item,
+      recordId: item.id,
+      dishName: item.dish_name,
+      baseQuantity: item.base_quantity,
+      aiSuggestQuantity: item.ai_suggest_quantity,
+    }))
   } catch (e) {}
   finally { loadingResult.value = false }
 }
@@ -125,6 +205,9 @@ async function submitConfirm() {
 }
 .trigger-card {
   margin-bottom: 16px;
+}
+.predict-tip {
+  margin-top: 12px;
 }
 .result-card {
   margin-bottom: 16px;

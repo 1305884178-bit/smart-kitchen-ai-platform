@@ -17,7 +17,8 @@
         <el-table-column prop="alertThreshold" label="预警阈值" width="90" />
         <el-table-column label="库存状态" width="100">
           <template #default="{ row }">
-            <el-tag v-if="row.dailyStock <= row.alertThreshold" type="danger" size="small">库存不足</el-tag>
+            <el-tag v-if="row.dailyStock === 0" type="danger" size="small">库存不足</el-tag>
+            <el-tag v-else-if="row.dailyStock < row.alertThreshold" type="warning" size="small">预警</el-tag>
             <el-tag v-else type="success" size="small">正常</el-tag>
           </template>
         </el-table-column>

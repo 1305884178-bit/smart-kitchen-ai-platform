@@ -85,6 +85,7 @@ public class DishProxyControllerIntegrationTest {
         assertEquals(200, result.getCode());
         assertEquals("水煮鱼", result.getData().get("name"));
         assertTrue(result.getData().get("ingredients").toString().contains("草鱼"));
+        assertTrue(result.getData().get("allergens").toString().contains("鱼"));
     }
 
     @Test

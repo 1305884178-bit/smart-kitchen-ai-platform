@@ -46,6 +46,20 @@ public class AdminPredictController {
     }
 
     /**
+     * 查询预测任务状态
+     * @param taskId 任务ID
+     * @return 任务状态
+     */
+    @GetMapping("/status")
+    public Result<Object> getPredictionStatus(@RequestParam String taskId) {
+        try {
+            return Result.success(pythonAIService.getPredictionStatus(taskId));
+        } catch (Exception e) {
+            return Result.error(500, "Python AI服务调用失败：" + e.getMessage());
+        }
+    }
+
+    /**
      * 确认/覆盖预测量
      * @param dto 包含recordId、finalQuantity、confirmedBy
      * @return 确认结果

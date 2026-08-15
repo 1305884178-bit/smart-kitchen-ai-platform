@@ -27,6 +27,7 @@ public class Order {
     private LocalDateTime completeTime;
     private Long operatorId;
     private String remark;
+    private Long parentOrderId;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

@@ -14,13 +14,16 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.smartkitchen.common.OrderDetailAddedEnum;
 import com.smartkitchen.common.OrderStatusEnum;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartkitchen.dto.OrderDetailDTO;
 import com.smartkitchen.dto.OrderSubmitDTO;
 import com.smartkitchen.entity.Dish;
 import com.smartkitchen.entity.Order;
 import com.smartkitchen.entity.OrderDetail;
+import com.smartkitchen.entity.Review;
 import com.smartkitchen.mapper.DishMapper;
 import com.smartkitchen.mapper.OrderMapper;
+import com.smartkitchen.mapper.ReviewMapper;
 import com.smartkitchen.service.OrderDetailService;
 import com.smartkitchen.service.OrderService;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -52,7 +55,13 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private OrderDetailService orderDetailService;
 
     @Autowired
+    private ReviewMapper reviewMapper;
+
+    @Autowired
     private KitchenBoardWebSocketHandler kitchenBoardWebSocketHandler;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Autowired
     private CustomerWebSocketHandler customerWebSocketHandler;
@@ -85,42 +94,49 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<OrderDetail> detailList = new ArrayList<>();
+        List<OrderDetail> activeDetails = new ArrayList<>(); // 在售菜品，需扣库存
 
         for (OrderDetailDTO detailDTO : submitDTO.getDetails()) {
             Long dishId = detailDTO.getDishId();
-            String key = STOCK_PREFIX + dishId;
-            
             Dish dish = dishMapper.selectById(dishId);
             if (dish == null) {
                 throw new RuntimeException("菜品不存在: " + dishId);
             }
 
-            if (Boolean.FALSE.equals(stringRedisTemplate.hasKey(key))) {
-                stringRedisTemplate.opsForValue().set(key, String.valueOf(dish.getDailyStock()));
-            }
-            
-            keys.add(key);
-            args.add(String.valueOf(detailDTO.getQuantity()));
-
-            // 组装明细
             OrderDetail detail = new OrderDetail();
             detail.setDishId(dishId);
-            detail.setDishName(dish.getName());
             detail.setQuantity(detailDTO.getQuantity());
-            detail.setPrice(dish.getPrice());
             detail.setIsAdded(OrderDetailAddedEnum.FIRST_ORDER.getCode());
             detail.setCreateTime(LocalDateTime.now());
-            detailList.add(detail);
 
-            totalAmount = totalAmount.add(dish.getPrice().multiply(new BigDecimal(detailDTO.getQuantity())));
+            if (dish.getStatus() != null && dish.getStatus() == 1) {
+                // 在售菜品：正常计算
+                String key = STOCK_PREFIX + dishId;
+                if (Boolean.FALSE.equals(stringRedisTemplate.hasKey(key))) {
+                    stringRedisTemplate.opsForValue().set(key, String.valueOf(dish.getDailyStock()));
+                }
+                keys.add(key);
+                args.add(String.valueOf(detailDTO.getQuantity()));
+
+                detail.setDishName(dish.getName());
+                detail.setPrice(dish.getPrice());
+                totalAmount = totalAmount.add(dish.getPrice().multiply(new BigDecimal(detailDTO.getQuantity())));
+                activeDetails.add(detail);
+            } else {
+                // 已下架菜品：不计金额、不扣库存、标记名称
+                detail.setDishName(dish.getName() + "（已下架）");
+                detail.setPrice(BigDecimal.ZERO);
+            }
+            detailList.add(detail);
         }
 
-        // Lua脚本扣减库存
-        Long result = stringRedisTemplate.execute(deductStockScript, keys, args.toArray(new String[0]));
-
-        if (result != null && result < 0) {
-            int index = (int) (-result - 1);
-            throw new RuntimeException("库存不足: " + submitDTO.getDetails().get(index).getDishId());
+        // Lua脚本扣减库存（仅对在售菜品）
+        if (!keys.isEmpty()) {
+            Long result = stringRedisTemplate.execute(deductStockScript, keys, args.toArray(new String[0]));
+            if (result != null && result < 0) {
+                int index = (int) (-result - 1);
+                throw new RuntimeException("库存不足: " + submitDTO.getDetails().get(index).getDishId());
+            }
         }
 
         try {
@@ -142,15 +158,21 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             }
             orderDetailService.saveBatch(detailList);
 
-            // 同步扣减数据库库存 (乐观锁兜底)
-            for (OrderDetail detail : detailList) {
+            // 同步扣减数据库库存（仅对在售菜品）
+            for (OrderDetail detail : activeDetails) {
                 int affectedRows = dishMapper.deductStock(detail.getDishId(), detail.getQuantity());
                 if (affectedRows == 0) {
                     throw new RuntimeException("数据库库存同步异常，菜品ID: " + detail.getDishId());
                 }
             }
 
-            kitchenBoardWebSocketHandler.sendMessage("{\"type\":\"NEW_ORDER\",\"message\":\"有新订单了\"}");
+            // 推送厨房看板（仅包含在售菜品）
+            try {
+                String orderJson = objectMapper.writeValueAsString(buildOrderVO(order, activeDetails));
+                kitchenBoardWebSocketHandler.sendMessage("{\"type\":\"NEW_ORDER\",\"order\":" + orderJson + "}");
+            } catch (Exception ignored) {
+                // WebSocket 推送失败不影响主流程
+            }
 
             // 发送延迟消息到RabbitMQ，30分钟后未支付自动取消
             if (rabbitTemplate != null) {
@@ -163,7 +185,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
             return orderNo;
         } catch (Exception e) {
-            stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
+            if (!keys.isEmpty()) {
+                stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
+            }
             throw e;
         }
     }
@@ -178,11 +202,35 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order.getStatus() != OrderStatusEnum.SERVED.getCode() && order.getStatus() != OrderStatusEnum.ORDERED.getCode()) {
             throw new RuntimeException("当前状态不可结账");
         }
-        order.setStatus(OrderStatusEnum.PAID.getCode());
+        if (order.getPayTime() != null) {
+            throw new RuntimeException("该订单已支付，请勿重复操作");
+        }
         order.setPaymentTradeNo("SIM_" + System.currentTimeMillis());
         order.setPayTime(LocalDateTime.now());
         order.setUpdateTime(LocalDateTime.now());
+        if (order.getStatus() == OrderStatusEnum.SERVED.getCode()) {
+            order.setStatus(OrderStatusEnum.PAID.getCode());
+        }
         this.updateById(order);
+
+        // 合并支付所有子订单（加菜订单）
+        List<Order> childOrders = this.lambdaQuery()
+                .eq(Order::getParentOrderId, orderId)
+                .list();
+        int childIndex = 0;
+        for (Order child : childOrders) {
+            if (child.getStatus() == OrderStatusEnum.ORDERED.getCode()
+                    || child.getStatus() == OrderStatusEnum.SERVED.getCode()) {
+                childIndex++;
+                child.setPaymentTradeNo(order.getPaymentTradeNo() + "_" + childIndex);
+                child.setPayTime(order.getPayTime());
+                child.setUpdateTime(LocalDateTime.now());
+                if (child.getStatus() == OrderStatusEnum.SERVED.getCode()) {
+                    child.setStatus(OrderStatusEnum.PAID.getCode());
+                }
+                this.updateById(child);
+            }
+        }
     }
 
     @Override
@@ -195,19 +243,51 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order.getStatus() != OrderStatusEnum.ORDERED.getCode() && order.getStatus() != OrderStatusEnum.SERVED.getCode()) {
             throw new RuntimeException("当前状态不可撤销");
         }
+
+        // 只有未出餐的订单撤销才返还库存
+        boolean shouldReturnStock = order.getStatus() == OrderStatusEnum.ORDERED.getCode();
+
         order.setStatus(OrderStatusEnum.CANCELLED.getCode());
         order.setCancelReason("用户/管理员撤销");
         order.setUpdateTime(LocalDateTime.now());
         this.updateById(order);
 
-        // 恢复库存
+        if (shouldReturnStock) {
+            returnStockForOrder(orderId);
+        }
+
+        // 级联取消所有子订单（加菜订单）
+        List<Order> childOrders = this.lambdaQuery()
+                .eq(Order::getParentOrderId, orderId)
+                .list();
+        for (Order child : childOrders) {
+            if (child.getStatus() == OrderStatusEnum.ORDERED.getCode()
+                    || child.getStatus() == OrderStatusEnum.SERVED.getCode()) {
+                // 子订单未出餐才返还库存
+                if (child.getStatus() == OrderStatusEnum.ORDERED.getCode()) {
+                    returnStockForOrder(child.getId());
+                }
+                child.setStatus(OrderStatusEnum.CANCELLED.getCode());
+                child.setCancelReason("父订单已撤销");
+                child.setUpdateTime(LocalDateTime.now());
+                this.updateById(child);
+            }
+        }
+    }
+
+    /**
+     * 返还指定订单的库存（Redis + DB同步）
+     */
+    private void returnStockForOrder(Long orderId) {
         List<OrderDetail> details = orderDetailService.lambdaQuery().eq(OrderDetail::getOrderId, orderId).list();
+        if (details.isEmpty()) return;
+
         List<String> keys = new ArrayList<>();
         List<String> args = new ArrayList<>();
         for (OrderDetail detail : details) {
             keys.add(STOCK_PREFIX + detail.getDishId());
             args.add(String.valueOf(detail.getQuantity()));
-            
+
             Dish dish = dishMapper.selectById(detail.getDishId());
             if (dish != null) {
                 dish.setDailyStock(dish.getDailyStock() + detail.getQuantity());
@@ -215,9 +295,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             }
         }
 
-        if (!keys.isEmpty()) {
-            stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
-        }
+        stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
     }
 
     @Override
@@ -241,6 +319,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             BeanUtils.copyProperties(order, vo);
             List<OrderDetail> details = allDetails.stream()
                     .filter(d -> d.getOrderId().equals(order.getId()))
+                    .filter(d -> d.getPrice().compareTo(BigDecimal.ZERO) > 0) // 过滤已下架菜品
                     .toList();
             vo.setDetails(details);
             return vo;
@@ -257,7 +336,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order.getStatus() != OrderStatusEnum.ORDERED.getCode()) {
             throw new RuntimeException("当前状态不可操作出餐");
         }
-        order.setStatus(OrderStatusEnum.SERVED.getCode());
+        // 若顾客已提前支付，出餐后自动流转到 PAID
+        if (order.getPayTime() != null) {
+            order.setStatus(OrderStatusEnum.PAID.getCode());
+        } else {
+            order.setStatus(OrderStatusEnum.SERVED.getCode());
+        }
         order.setCompleteTime(LocalDateTime.now());
         order.setUpdateTime(LocalDateTime.now());
         this.updateById(order);
@@ -268,81 +352,123 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void addDish(Long orderId, AddDishDTO addDishDTO) {
-        Order order = this.getById(orderId);
-        if (order == null) {
+        Order originalOrder = this.getById(orderId);
+        if (originalOrder == null) {
             throw new RuntimeException("订单不存在");
         }
-        if (order.getStatus() != OrderStatusEnum.ORDERED.getCode() && order.getStatus() != OrderStatusEnum.SERVED.getCode()) {
+        if (originalOrder.getStatus() != OrderStatusEnum.ORDERED.getCode()
+                && originalOrder.getStatus() != OrderStatusEnum.SERVED.getCode()) {
             throw new RuntimeException("当前状态不可加菜");
-        }
-
-        // 若当前状态为SERVED，回退到ORDERED
-        boolean wasServed = order.getStatus().equals(OrderStatusEnum.SERVED.getCode());
-        if (wasServed) {
-            order.setStatus(OrderStatusEnum.ORDERED.getCode());
-            order.setUpdateTime(LocalDateTime.now());
-            this.updateById(order);
         }
 
         List<String> keys = new ArrayList<>();
         List<String> args = new ArrayList<>();
-        BigDecimal addAmount = BigDecimal.ZERO;
+        BigDecimal totalAmount = BigDecimal.ZERO;
         List<OrderDetail> newDetails = new ArrayList<>();
+        List<OrderDetail> activeDetails = new ArrayList<>(); // 在售菜品，需扣库存
 
         for (OrderDetailDTO detailDTO : addDishDTO.getDetails()) {
             Long dishId = detailDTO.getDishId();
-            String key = STOCK_PREFIX + dishId;
 
             Dish dish = dishMapper.selectById(dishId);
             if (dish == null) {
                 throw new RuntimeException("菜品不存在: " + dishId);
             }
 
-            if (Boolean.FALSE.equals(stringRedisTemplate.hasKey(key))) {
-                stringRedisTemplate.opsForValue().set(key, String.valueOf(dish.getDailyStock()));
-            }
-
-            keys.add(key);
-            args.add(String.valueOf(detailDTO.getQuantity()));
-
             OrderDetail detail = new OrderDetail();
-            detail.setOrderId(orderId);
             detail.setDishId(dishId);
-            detail.setDishName(dish.getName());
             detail.setQuantity(detailDTO.getQuantity());
-            detail.setPrice(dish.getPrice());
             detail.setIsAdded(OrderDetailAddedEnum.ADDED.getCode());
             detail.setCreateTime(LocalDateTime.now());
-            newDetails.add(detail);
 
-            addAmount = addAmount.add(dish.getPrice().multiply(new BigDecimal(detailDTO.getQuantity())));
+            if (dish.getStatus() != null && dish.getStatus() == 1) {
+                // 在售菜品：正常计算
+                String key = STOCK_PREFIX + dishId;
+                if (Boolean.FALSE.equals(stringRedisTemplate.hasKey(key))) {
+                    stringRedisTemplate.opsForValue().set(key, String.valueOf(dish.getDailyStock()));
+                }
+                keys.add(key);
+                args.add(String.valueOf(detailDTO.getQuantity()));
+
+                detail.setDishName(dish.getName());
+                detail.setPrice(dish.getPrice());
+                totalAmount = totalAmount.add(dish.getPrice().multiply(new BigDecimal(detailDTO.getQuantity())));
+                activeDetails.add(detail);
+            } else {
+                // 已下架菜品：不计金额、不扣库存、标记名称
+                detail.setDishName(dish.getName() + "（已下架）");
+                detail.setPrice(BigDecimal.ZERO);
+            }
+            newDetails.add(detail);
         }
 
-        Long result = stringRedisTemplate.execute(deductStockScript, keys, args.toArray(new String[0]));
-        if (result != null && result < 0) {
-            throw new RuntimeException("库存不足，加菜失败");
+        // Lua脚本扣减库存（仅对在售菜品）
+        if (!keys.isEmpty()) {
+            Long result = stringRedisTemplate.execute(deductStockScript, keys, args.toArray(new String[0]));
+            if (result != null && result < 0) {
+                throw new RuntimeException("库存不足，加菜失败");
+            }
         }
 
         try {
+            // 创建新订单（独立于原订单，相同座位号）
+            String orderNo = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+            Order newOrder = new Order();
+            newOrder.setOrderNo(orderNo);
+            newOrder.setUserId(originalOrder.getUserId());
+            newOrder.setSeatNumber(originalOrder.getSeatNumber());
+            newOrder.setTotalAmount(totalAmount);
+            newOrder.setStatus(OrderStatusEnum.ORDERED.getCode());
+            newOrder.setParentOrderId(originalOrder.getId());
+            newOrder.setRemark("加菜（原订单#" + originalOrder.getOrderNo() + "）");
+            newOrder.setCreateTime(LocalDateTime.now());
+            newOrder.setUpdateTime(LocalDateTime.now());
+            this.save(newOrder);
+
+            for (OrderDetail detail : newDetails) {
+                detail.setOrderId(newOrder.getId());
+            }
             orderDetailService.saveBatch(newDetails);
 
-            // 更新订单总金额
-            order.setTotalAmount(order.getTotalAmount().add(addAmount));
-            order.setUpdateTime(LocalDateTime.now());
-            this.updateById(order);
-
-            // 同步扣减数据库库存
-            for (OrderDetail detail : newDetails) {
+            // 同步扣减数据库库存（仅对在售菜品）
+            for (OrderDetail detail : activeDetails) {
                 int affectedRows = dishMapper.deductStock(detail.getDishId(), detail.getQuantity());
                 if (affectedRows == 0) {
                     throw new RuntimeException("数据库库存同步异常，菜品ID: " + detail.getDishId());
                 }
             }
 
-            kitchenBoardWebSocketHandler.sendMessage("{\"type\":\"ORDER_UPDATED\",\"message\":\"订单有加菜更新\"}");
+            // 推送新订单到厨房看板（仅包含在售菜品）
+            sendNewOrderToKitchenBoard(newOrder, activeDetails);
         } catch (Exception e) {
-            stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
+            if (!keys.isEmpty()) {
+                stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
+            }
             throw e;
+        }
+    }
+
+    /**
+     * 构建 OrderVO
+     */
+    private OrderVO buildOrderVO(Order order, List<OrderDetail> details) {
+        OrderVO vo = new OrderVO();
+        BeanUtils.copyProperties(order, vo);
+        vo.setDetails(details);
+        return vo;
+    }
+
+    /**
+     * 构建 OrderVO 并推送到厨房看板 WebSocket
+     */
+    private void sendNewOrderToKitchenBoard(Order order, List<OrderDetail> details) {
+        try {
+            OrderVO vo = buildOrderVO(order, details);
+            String orderJson = objectMapper.writeValueAsString(vo);
+            String message = "{\"type\":\"NEW_ORDER\",\"order\":" + orderJson + "}";
+            kitchenBoardWebSocketHandler.sendMessage(message);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 
@@ -352,6 +478,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         Page<Order> orderPage = new Page<>(page, size);
         this.lambdaQuery()
                 .eq(Order::getUserId, userId)
+                .isNull(Order::getParentOrderId)
                 .orderByDesc(Order::getCreateTime)
                 .page(orderPage);
 
@@ -360,18 +487,49 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             return voPage;
         }
 
-        List<Long> orderIds = orderPage.getRecords().stream().map(Order::getId).toList();
+        List<Long> parentIds = orderPage.getRecords().stream().map(Order::getId).toList();
+
+        // 查询所有子订单（加菜订单）
+        List<Order> childOrders = this.lambdaQuery()
+                .in(Order::getParentOrderId, parentIds)
+                .list();
+
+        // 合并所有订单ID（父 + 子）
+        List<Long> allOrderIds = new ArrayList<>(parentIds);
+        childOrders.forEach(c -> allOrderIds.add(c.getId()));
+
         List<OrderDetail> allDetails = orderDetailService.lambdaQuery()
-                .in(OrderDetail::getOrderId, orderIds)
+                .in(OrderDetail::getOrderId, allOrderIds)
                 .list();
 
         List<OrderVO> voList = orderPage.getRecords().stream().map(order -> {
             OrderVO vo = new OrderVO();
             BeanUtils.copyProperties(order, vo);
+            // 合并父订单 + 子订单的菜品明细
+            List<Long> childIds = childOrders.stream()
+                    .filter(c -> c.getParentOrderId().equals(order.getId()))
+                    .map(Order::getId)
+                    .toList();
+            List<Long> mergedOrderIds = new ArrayList<>();
+            mergedOrderIds.add(order.getId());
+            mergedOrderIds.addAll(childIds);
             List<OrderDetail> details = allDetails.stream()
-                    .filter(d -> d.getOrderId().equals(order.getId()))
+                    .filter(d -> mergedOrderIds.contains(d.getOrderId()))
                     .toList();
             vo.setDetails(details);
+
+            // 合并总金额
+            BigDecimal childTotal = childOrders.stream()
+                    .filter(c -> c.getParentOrderId().equals(order.getId()))
+                    .map(Order::getTotalAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            vo.setTotalAmount(order.getTotalAmount().add(childTotal));
+
+            // 合并状态：所有子订单都完成才算已上菜/已结账
+            List<Order> orderChildren = childOrders.stream()
+                    .filter(c -> c.getParentOrderId().equals(order.getId()))
+                    .toList();
+            vo.setStatus(computeMergedStatus(order, orderChildren));
             return vo;
         }).toList();
 
@@ -393,11 +551,97 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         OrderDetailVO vo = new OrderDetailVO();
         BeanUtils.copyProperties(order, vo);
 
+        // 查询子订单（加菜订单）
+        List<Order> childOrders = this.lambdaQuery()
+                .eq(Order::getParentOrderId, orderId)
+                .list();
+
+        List<Long> allOrderIds = new ArrayList<>();
+        allOrderIds.add(orderId);
+        childOrders.forEach(c -> allOrderIds.add(c.getId()));
+
+        List<OrderDetail> details = orderDetailService.lambdaQuery()
+                .in(OrderDetail::getOrderId, allOrderIds)
+                .list();
+        vo.setDetails(details);
+
+        // 合并总金额
+        BigDecimal childTotal = childOrders.stream()
+                .map(Order::getTotalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        vo.setTotalAmount(order.getTotalAmount().add(childTotal));
+
+        // 合并状态：所有子订单都完成才算已上菜/已结账
+        vo.setStatus(computeMergedStatus(order, childOrders));
+
+        vo.setAvailableActions(getAvailableActions(order, childOrders));
+        return vo;
+    }
+
+    /**
+     * 计算父子订单的合并状态
+     * 规则：任一取消→取消；全部至少SERVED→SERVED；全部PAID→PAID；否则→ORDERED
+     */
+    private int computeMergedStatus(Order parentOrder, List<Order> childOrders) {
+        // 任一下单被取消 → 整体取消
+        if (parentOrder.getStatus() == OrderStatusEnum.CANCELLED.getCode()) {
+            return OrderStatusEnum.CANCELLED.getCode();
+        }
+        for (Order child : childOrders) {
+            if (child.getStatus() == OrderStatusEnum.CANCELLED.getCode()) {
+                return OrderStatusEnum.CANCELLED.getCode();
+            }
+        }
+
+        // 全部PAID → PAID
+        boolean allPaid = parentOrder.getStatus() == OrderStatusEnum.PAID.getCode();
+        if (allPaid) {
+            for (Order child : childOrders) {
+                if (child.getStatus() != OrderStatusEnum.PAID.getCode()) {
+                    allPaid = false;
+                    break;
+                }
+            }
+        }
+        if (allPaid) {
+            return OrderStatusEnum.PAID.getCode();
+        }
+
+        // 全部至少SERVED → SERVED
+        boolean allServed = parentOrder.getStatus() == OrderStatusEnum.SERVED.getCode()
+                || parentOrder.getStatus() == OrderStatusEnum.PAID.getCode();
+        if (allServed) {
+            for (Order child : childOrders) {
+                int cs = child.getStatus();
+                if (cs != OrderStatusEnum.SERVED.getCode() && cs != OrderStatusEnum.PAID.getCode()) {
+                    allServed = false;
+                    break;
+                }
+            }
+        }
+        if (allServed) {
+            return OrderStatusEnum.SERVED.getCode();
+        }
+
+        // 其余情况 → ORDERED
+        return OrderStatusEnum.ORDERED.getCode();
+    }
+
+    @Override
+    public OrderDetailVO getAdminOrderDetail(Long orderId) {
+        Order order = this.getById(orderId);
+        if (order == null) {
+            throw new RuntimeException("订单不存在");
+        }
+
+        OrderDetailVO vo = new OrderDetailVO();
+        BeanUtils.copyProperties(order, vo);
+
         List<OrderDetail> details = orderDetailService.lambdaQuery()
                 .eq(OrderDetail::getOrderId, orderId)
                 .list();
         vo.setDetails(details);
-        vo.setAvailableActions(getAvailableActions(order.getStatus()));
+        vo.setAvailableActions(getAvailableActions(order));
         return vo;
     }
 
@@ -429,6 +673,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             BeanUtils.copyProperties(order, vo);
             List<OrderDetail> details = allDetails.stream()
                     .filter(d -> d.getOrderId().equals(order.getId()))
+                    .filter(d -> d.getPrice().compareTo(BigDecimal.ZERO) > 0) // 过滤已下架菜品
                     .toList();
             vo.setDetails(details);
             return vo;
@@ -439,19 +684,60 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     }
 
     /**
-     * 根据订单状态计算可操作按钮列表
-     * @param status 订单状态码
+     * 根据订单状态计算可操作按钮列表（管理员用，单订单）
+     * @param order 订单对象
      * @return 可用操作列表
      */
-    private List<String> getAvailableActions(int status) {
+    private List<String> getAvailableActions(Order order) {
+        int status = order.getStatus();
         if (status == OrderStatusEnum.ORDERED.getCode()) {
+            if (order.getPayTime() != null) {
+                return List.of("ADD_DISH");
+            }
             return Arrays.asList("ADD_DISH", "PAY");
         } else if (status == OrderStatusEnum.SERVED.getCode()) {
             return Arrays.asList("ADD_DISH", "PAY");
         } else if (status == OrderStatusEnum.PAID.getCode()) {
-            return List.of("REVIEW");
+            boolean hasReviewed = reviewMapper.selectCount(
+                    new LambdaQueryWrapper<Review>()
+                            .eq(Review::getOrderId, order.getId())
+            ) > 0;
+            return hasReviewed ? new ArrayList<>() : List.of("REVIEW");
         } else {
             return new ArrayList<>();
         }
+    }
+
+    /**
+     * 根据订单状态计算可操作按钮列表（C端用，含子订单合并状态）
+     * @param parentOrder 父订单对象
+     * @param childOrders 子订单列表（加菜订单）
+     * @return 可用操作列表
+     */
+    private List<String> getAvailableActions(Order parentOrder, List<Order> childOrders) {
+        int status = parentOrder.getStatus();
+
+        // 已结账 → 只能评价
+        if (status == OrderStatusEnum.PAID.getCode()) {
+            boolean hasReviewed = reviewMapper.selectCount(
+                    new LambdaQueryWrapper<Review>()
+                            .eq(Review::getOrderId, parentOrder.getId())
+            ) > 0;
+            return hasReviewed ? new ArrayList<>() : List.of("REVIEW");
+        }
+
+        // 已取消 → 无操作
+        if (status == OrderStatusEnum.CANCELLED.getCode()) {
+            return new ArrayList<>();
+        }
+
+        // ORDERED 或 SERVED：可加菜 + 可结账
+        // 提前支付的订单不显示结账
+        List<String> actions = new ArrayList<>();
+        actions.add("ADD_DISH");
+        if (parentOrder.getPayTime() == null) {
+            actions.add("PAY");
+        }
+        return actions;
     }
 }

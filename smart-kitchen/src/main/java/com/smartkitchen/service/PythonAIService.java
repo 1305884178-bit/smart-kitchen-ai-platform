@@ -26,6 +26,13 @@ public interface PythonAIService {
     Map<String, Object> getPredictionResult(String targetDate);
 
     /**
+     * 查询预测任务状态
+     * @param taskId 任务ID
+     * @return Python返回结果
+     */
+    Map<String, Object> getPredictionStatus(String taskId);
+
+    /**
      * 确认预测量
      * @param dto 确认参数
      * @return Python返回结果

@@ -80,16 +80,32 @@
             <version>0.11.5</version>
             <scope>runtime</scope>
         </dependency>
-        <!-- 阿里云 STS SDK（用于签发 OSS 临时凭证） -->
+        <!-- dotenv-java：启动时自动加载 .env 文件到环境变量 -->
         <dependency>
-            <groupId>com.aliyun</groupId>
-            <artifactId>aliyun-java-sdk-sts</artifactId>
-            <version>3.1.1</version>
+            <groupId>io.github.cdimascio</groupId>
+            <artifactId>dotenv-java</artifactId>
+            <version>3.0.0</version>
         </dependency>
+
+        <!-- 阿里云 OSS SDK（服务端上传） -->
         <dependency>
-            <groupId>com.aliyun</groupId>
-            <artifactId>aliyun-java-sdk-core</artifactId>
-            <version>4.6.4</version>
+            <groupId>com.aliyun.oss</groupId>
+            <artifactId>aliyun-sdk-oss</artifactId>
+            <version>3.17.4</version>
+        </dependency>
+
+        <!-- Apache POI：解析 Word(.docx) 文档提取文本（复用本地已有 3.16，避免引入新依赖） -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>3.16</version>
+        </dependency>
+
+        <!-- PDFBox：解析 PDF 文档提取文本 -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>2.0.30</version>
         </dependency>
 
         <!-- Test -->

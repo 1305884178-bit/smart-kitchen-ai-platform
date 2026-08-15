@@ -15,8 +15,7 @@ import java.time.LocalDateTime;
 public class KnowledgeDocument {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String fileName;
-    private String fileUrl;
+    private String title;
     private Integer chunkCount;
     private Integer version;
     private String status;

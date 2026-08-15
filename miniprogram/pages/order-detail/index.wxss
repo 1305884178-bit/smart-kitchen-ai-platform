@@ -16,9 +16,9 @@
 }
 
 .status-0 { background: #e3f2fd; color: #1976d2; }
-.status-1 { background: #e8f5e9; color: #388e3c; }
-.status-2 { background: #fff3e0; color: #e65100; }
-.status-3 { background: #fce4ec; color: #c62828; }
+.status-10 { background: #e8f5e9; color: #388e3c; }
+.status-20 { background: #fff3e0; color: #e65100; }
+.status-90 { background: #fce4ec; color: #c62828; }
 
 .order-info {
   margin-top: 16rpx;
@@ -50,8 +50,22 @@
 .order-item {
   display: flex;
   align-items: center;
-  padding: 10rpx 0;
+  padding: 16rpx 0;
   border-bottom: 1rpx solid #f5f5f5;
+}
+
+.item-name {
+  flex: 1;
+  font-size: 28rpx;
+  color: #333;
+}
+
+.item-price {
+  font-size: 28rpx;
+  color: #ff6b35;
+  font-weight: 500;
+  margin-left: 20rpx;
+  white-space: nowrap;
 }
 
 .added-tag {
@@ -61,6 +75,15 @@
   padding: 2rpx 10rpx;
   border-radius: 4rpx;
   margin-left: 12rpx;
+}
+
+.off-shelf-tag {
+  font-size: 20rpx;
+  color: #999;
+  background: #f5f5f5;
+  padding: 2rpx 8rpx;
+  border-radius: 4rpx;
+  margin-left: 8rpx;
 }
 
 .action-section {

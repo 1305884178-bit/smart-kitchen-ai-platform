@@ -28,7 +28,7 @@
 | 缓存与并发 | Redis + Lua 脚本 |
 | 实时通信 | Spring WebSocket |
 | 安全认证 | JJWT + HandlerInterceptor |
-| AI 编排 | Python FastAPI + LangGraph Supervisor（多智能体）|
+| AI 编排 | Python FastAPI + LangGraph（备菜预测多节点工作流）|
 | 向量检索 | Milvus（RAG知识库） |
 | 消息队列 | RabbitMQ（订单超时延迟消息） |
 
@@ -327,7 +327,7 @@ data: { answer, sources }` | 单Agent + Function Calling，调用RAG检索菜品
 
 | 方法 | 路径 | 入参 | 出参 data | 说明 |
 |------|------|------|------|------|
-| POST | /ai/predict/trigger | `{ targetDate }` | `{ taskId, status: "running" }` | 触发LangGraph预测流程：supervisor→数据节点并行→时序预测→LLM修正→落库 |
+| POST | /ai/predict/trigger | `{ targetDate }` | `{ taskId, status: "running" }` | 触发LangGraph预测流程：数据节点并行→时序预测→LLM修正→落库 |
 | GET | /ai/predict/result | Query: `?date=2026-07-18` | `[{ dishId, dishName, baseQuantity, aiSuggestQuantity, finalQuantity, reasoning, confidence, recentAvgScore, status }]` | 查询指定日期预测结果；confidence<0.4标记低置信度 |
 | PUT | /ai/predict/confirm | `{ predictDate, dishId, finalQuantity, confirmedBy }` | `{ status: "confirmed" }` | 管理员确认/覆盖预测数量 |
 
@@ -348,41 +348,34 @@ data: { answer, sources }` | 单Agent + Function Calling，调用RAG检索菜品
 - Python 服务地址由 `application.yml` 中 `python-service.url` 配置
 - Java 仅在 `/api/admin/knowledge/upload` 和 AI客服代理中调用 Python 接口
 
-### 8.2 LangGraph 备菜预测节点图（Supervisor 架构）
+### 8.2 LangGraph 备菜预测节点图（多节点工作流）
 
 ```
-Supervisor Graph
+备菜预测图（predict_subgraph）
   │
-  ├── supervisor_node ── 条件路由（根据 task_type）
-  │     ├── "predict" → predict_subgraph
-  │     ├── "other"  → other_node（兜底，返回不支持提示）
-  │     └── 空/null  → END（返回无法识别）
+  ▼
+[get_sales_30d] ── 拉取菜品30天日销量 → MySQL
   │
-  ├── predict_subgraph（备菜预测子图）
-        │
-        ▼
-      [get_sales_30d] ── 拉取菜品30天日销量 → MySQL
-        │
-        ▼
-      [get_tomorrow_weather] ── MCP 调用天气 API
-        │
-        ▼
-      [get_holiday_info] ── MCP 判断节假日
-        │
-        ▼
-      [get_recent_reviews] ── 拉取菜品30天评分均值 → MySQL
-        │
-        ▼
-      [time_series_predict] ── 30天销量统计（均值/中位数/近7日均值）→ 数据不足时冷启动降级（同类菜品→新品库存→日常库存→兜底）
-        │
-        ▼
-      [llm_adjust] ── Prompt → 大模型修正 → 输出 JSON
-        │
-        ▼
-      [save_result] ── 写入 ai_prediction_record 表
+  ▼
+[get_tomorrow_weather] ── MCP 调用天气 API
+  │
+  ▼
+[get_holiday_info] ── MCP 判断节假日
+  │
+  ▼
+[get_recent_reviews] ── 拉取菜品30天评分均值 → MySQL
+  │
+  ▼
+[time_series_predict] ── 30天销量统计（均值/中位数/近7日均值）→ 数据不足时冷启动降级（同类菜品→新品库存→日常库存→兜底）
+  │
+  ▼
+[llm_adjust] ── Prompt → 大模型修正 → 输出 JSON
+  │
+  ▼
+[save_result] ── 写入 ai_prediction_record 表
 ```
 
-**架构说明**：Supervisor 多智能体入口根据 task_type 路由：已知类型分发到对应子图，未知类型走 other_node 兜底返回不支持提示，空/null 直接结束。备菜预测子图由 Supervisor 统一调度。LLM Prompt 外置到 `app/prompts/predict_llm_prompt.txt`，Supervisor 路由提示词外置到 `app/prompts/supervisor_prompt.txt`。整个图中仅 llm_adjust 一个节点调用 LLM，其余为确定性 Python 函数。天气和节假日数据来源：
+**架构说明**：备菜预测为单一多节点工作流（predict_subgraph），由 `/ai/predict/trigger` 接口或定时任务直接触发，不再经过 Supervisor 路由层。LLM Prompt 外置到 `app/prompts/predict_llm_prompt.txt`。整个图中仅 llm_adjust 一个节点调用 LLM，其余为确定性 Python 函数。天气和节假日数据来源：
   - **天气**：`weather_tools.py` → OpenWeatherMap `/data/2.5/forecast` REST API；城市写死为 `WEATHER_CITY` 环境变量，非 MCP 直调 HTTP
   - **节假日**：`holiday_tools.py` → ModelScope `china-festival-mcp` 通过标准 MCP JSON-RPC 协议（initialize → tools/list → tools/call）查询
 ### 8.3 AI客服架构（单Agent + Function Calling）

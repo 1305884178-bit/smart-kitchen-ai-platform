@@ -14,7 +14,9 @@
           </el-select>
         </el-form-item>
         <el-form-item label="座位号">
-          <el-input v-model="filterForm.seatNumber" placeholder="如 A01" clearable style="width:160px" />
+          <el-select v-model="filterForm.seatNumber" placeholder="全部" clearable style="width:160px">
+            <el-option v-for="s in seatOptions" :key="s" :label="s" :value="s" />
+          </el-select>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="loadOrders">查询</el-button>
@@ -45,19 +47,21 @@
           </template>
         </el-table-column>
         <el-table-column prop="createTime" label="下单时间" width="170" />
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="showDetail(row.id)">详情</el-button>
-            <el-button
-              v-if="row.status === 0 || row.status === 10"
-              size="small" type="danger"
-              @click="handleCancel(row.id)"
-            >撤销</el-button>
-            <el-button
-              v-if="row.status === 0"
-              size="small" type="success"
-              @click="handleComplete(row.id)"
-            >完成出餐</el-button>
+            <div class="action-buttons">
+              <el-button size="small" @click="showDetail(row.id)">详情</el-button>
+              <el-button
+                v-if="row.status === 0 || row.status === 10"
+                size="small" type="danger"
+                @click="handleCancel(row.id)"
+              >撤销</el-button>
+              <el-button
+                v-if="row.status === 0"
+                size="small" type="success"
+                @click="handleComplete(row.id)"
+              >完成出餐</el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -113,7 +117,8 @@ const page = ref(1)
 const size = ref(10)
 const total = ref(0)
 
-const filterForm = reactive({ status: null, seatNumber: '' })
+const filterForm = reactive({ status: null, seatNumber: null })
+const seatOptions = ref([])
 
 const detailVisible = ref(false)
 const detail = ref(null)
@@ -146,14 +151,26 @@ async function loadOrders() {
 
 function resetFilter() {
   filterForm.status = null
-  filterForm.seatNumber = ''
+  filterForm.seatNumber = null
   page.value = 1
   loadOrders()
 }
 
+/**
+ * 加载可选座位号列表
+ */
+async function loadSeats() {
+  try {
+    const res = await request.get('/api/seat/available')
+    seatOptions.value = (res.data || []).map(s => s.seatNumber)
+  } catch (e) {
+    // 错误已在拦截器处理
+  }
+}
+
 async function showDetail(id) {
   try {
-    const res = await request.get(`/api/order/my-detail/${id}`)
+    const res = await request.get(`/api/order/admin-detail/${id}`)
     detail.value = res.data
     detailVisible.value = true
   } catch (e) {
@@ -183,6 +200,7 @@ async function handleComplete(id) {
 }
 
 onMounted(() => {
+  loadSeats()
   loadOrders()
 })
 </script>
@@ -203,6 +221,11 @@ onMounted(() => {
   font-size: 13px;
   color: #606266;
   line-height: 1.6;
+}
+.action-buttons {
+  display: flex;
+  gap: 4px;
+  white-space: nowrap;
 }
 .pagination-wrap {
   margin-top: 16px;

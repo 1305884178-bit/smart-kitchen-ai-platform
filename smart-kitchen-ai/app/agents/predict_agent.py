@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+import re
 from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
@@ -35,6 +36,7 @@ class PredictState(TypedDict):
     fallback_category_avg: Optional[int]
     fallback_initial_stock: Optional[int]
     fallback_daily_stock: Optional[int]
+    base_quantity: Optional[int]
     ai_suggest_quantity: Optional[int]
     reasoning: Optional[str]
     confidence: Optional[float]
@@ -147,6 +149,32 @@ def _cold_start_fallback(dish_id: int) -> dict:
     return {"ts_fallback_level": 5}
 
 
+def _fallback_base_quantity(fallback: dict) -> Optional[int]:
+    """根据冷启动降级级别推导基准量，保证前端「基准量」有值展示"""
+    level = fallback.get("ts_fallback_level", 5)
+    if level == 2:
+        return fallback.get("fallback_category_avg")
+    if level == 3:
+        return fallback.get("fallback_initial_stock")
+    if level == 4:
+        return fallback.get("fallback_daily_stock")
+    # Level 5：绝对兜底，取 20 份（与 Prompt 规则保持一致）
+    return 20
+
+
+def _ensure_consistent_reasoning(reasoning: str, suggest_quantity: int) -> str:
+    """保证推理说明中声明的最终建议量与 JSON 中的 suggest_quantity 完全一致"""
+    reasoning = (reasoning or "").strip()
+    pattern = re.compile(
+        r"(最终建议量|最终建议|最终备菜量|最终备菜|最终推荐量)\s*(为|是|：|:)?\s*\d+\s*份?"
+    )
+    replaced = pattern.sub(f"最终建议量为 {suggest_quantity} 份", reasoning)
+    if replaced != reasoning:
+        return replaced
+    suffix = f"最终建议量为 {suggest_quantity} 份。"
+    return f"{reasoning}。{suffix}" if reasoning else suffix
+
+
 async def time_series_predict_node(state: PredictState) -> PredictState:
     """时序预测：基于过去30天销量计算基础备菜量及统计参考值"""
     sales = state.get("sales_30d", [])
@@ -161,6 +189,8 @@ async def time_series_predict_node(state: PredictState) -> PredictState:
             "ts_avg_30d": None,
             "ts_avg_7d": None,
             "ts_median_30d": None,
+            # 冷启动时基准量取自降级参考值，否则前端"基准量"将显示为空
+            "base_quantity": _fallback_base_quantity(fallback),
             **fallback,
         }
 
@@ -182,6 +212,7 @@ async def time_series_predict_node(state: PredictState) -> PredictState:
             "ts_avg_30d": avg_30d if days >= 3 else None,
             "ts_avg_7d": avg_7d,
             "ts_median_30d": median_30d if days >= 3 else None,
+            "base_quantity": avg_7d,
             **fallback,
             "ts_fallback_level": 1,  # 覆盖冷启动级别：有数据但不足，以已有数据为优先
         }
@@ -197,6 +228,7 @@ async def time_series_predict_node(state: PredictState) -> PredictState:
         "ts_avg_7d": avg_7d,
         "ts_median_30d": median_30d,
         "ts_fallback_level": 0,
+        "base_quantity": result,
     }
 
 
@@ -207,7 +239,10 @@ async def llm_adjust_node(state: PredictState) -> PredictState:
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
             model=settings.llm_model,
-            timeout=10
+            timeout=60,
+            # 关闭 DeepSeek 思考模式（默认开启），备菜预测只需确定性 JSON 输出，
+            # 关闭后响应显著变快，避免思考链生成耗时导致超时。
+            extra_body={"thinking": {"type": "disabled"}},
         )
 
         prompt_template = _load_prompt("predict_llm_prompt.txt")
@@ -241,11 +276,19 @@ async def llm_adjust_node(state: PredictState) -> PredictState:
 
         result = json.loads(content)
 
+        suggest_quantity = result.get("suggest_quantity", time_series_val)
+        if suggest_quantity is not None:
+            # 归一化为整数，保证与落库的 int 字段及推理说明中的数值一致
+            suggest_quantity = int(suggest_quantity)
+        reasoning = _ensure_consistent_reasoning(
+            result.get("reasoning", "LLM adjustment"), suggest_quantity
+        )
+
         return {
-            "ai_suggest_quantity": result.get("suggest_quantity", time_series_val),
-            "reasoning": result.get("reasoning", "LLM adjustment"),
+            "ai_suggest_quantity": suggest_quantity,
+            "reasoning": reasoning,
             "confidence": result.get("confidence", 0.8),
-            "final_quantity": result.get("suggest_quantity", time_series_val)
+            "final_quantity": suggest_quantity
         }
     except Exception as e:
         logger.error(f"LLM adjustment failed, degrading to time series. Error: {e}")
@@ -275,7 +318,7 @@ async def save_result_node(state: PredictState) -> PredictState:
                     WHERE id = %s
                 """
                 cursor.execute(update_sql, (
-                    state.get('time_series_result'),
+                    state.get('base_quantity'),
                     state.get('ai_suggest_quantity'),
                     state.get('final_quantity'),
                     state.get('reasoning'),
@@ -292,7 +335,7 @@ async def save_result_node(state: PredictState) -> PredictState:
                 cursor.execute(insert_sql, (
                     state['predict_date'],
                     state['dish_id'],
-                    state.get('time_series_result'),
+                    state.get('base_quantity'),
                     state.get('ai_suggest_quantity'),
                     state.get('final_quantity'),
                     state.get('reasoning'),
@@ -305,10 +348,11 @@ async def save_result_node(state: PredictState) -> PredictState:
         logger.error(f"Error saving prediction result: {e}")
     finally:
         conn.close()
-    return state
+    # 只落库、不修改状态：返回空字典，避免与 llm_adjust 节点写同一键导致 LangGraph 并发更新冲突
+    return {}
 
 
-# 构建备菜预测子图（顺序执行，由上层 Supervisor 管理）
+# 构建备菜预测子图（顺序执行，由触发接口/定时任务直接调用）
 builder = StateGraph(PredictState)
 
 builder.add_node("get_sales_30d", get_sales_30d_node)
