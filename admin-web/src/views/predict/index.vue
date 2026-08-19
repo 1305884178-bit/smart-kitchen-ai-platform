@@ -29,6 +29,12 @@
         <el-table-column prop="dishName" label="菜品名称" width="140" />
         <el-table-column prop="baseQuantity" label="基准量" width="80" />
         <el-table-column prop="aiSuggestQuantity" label="AI 建议量" width="100" />
+        <el-table-column label="最终确认量" width="110">
+          <template #default="{ row }">
+            <span v-if="row.status === 1" class="final-quantity">{{ row.finalQuantity ?? row.aiSuggestQuantity }}</span>
+            <span v-else class="final-quantity-empty">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="置信度" width="90">
           <template #default="{ row }">
             <span :style="{ color: row.confidence < 0.4 ? '#f56c6c' : '#67c23a' }">
@@ -39,7 +45,8 @@
         <el-table-column prop="reasoning" label="推理说明" min-width="200" />
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" @click="openConfirm(row)">确认/覆盖</el-button>
+            <el-button v-if="row.status !== 1" size="small" type="primary" @click="openConfirm(row)">确认/覆盖</el-button>
+            <el-tag v-else type="success" size="small">操作成功</el-tag>
           </template>
         </el-table-column>
       </el-table>
@@ -169,6 +176,7 @@ async function loadResult() {
       dishName: item.dish_name,
       baseQuantity: item.base_quantity,
       aiSuggestQuantity: item.ai_suggest_quantity,
+      finalQuantity: item.final_quantity,
     }))
   } catch (e) {}
   finally { loadingResult.value = false }
@@ -191,6 +199,12 @@ async function submitConfirm() {
     await request.post('/api/admin/predict/confirm', payload)
     ElMessage.success('确认成功')
     confirmVisible.value = false
+    // 立即更新该行状态与最终确认量，表格即时刷新，无需等待重新查询
+    const row = results.value.find(r => (r.recordId || r.id) === payload.recordId)
+    if (row) {
+      row.status = 1
+      row.finalQuantity = confirmForm.finalQuantity
+    }
     loadResult()
   } catch (e) {}
   finally { confirming.value = false }
@@ -211,5 +225,12 @@ async function submitConfirm() {
 }
 .result-card {
   margin-bottom: 16px;
+}
+.final-quantity {
+  color: #67c23a;
+  font-weight: 600;
+}
+.final-quantity-empty {
+  color: #c0c4cc;
 }
 </style>

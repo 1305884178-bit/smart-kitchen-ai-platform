@@ -17,11 +17,16 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Autowired
     private CustomerWebSocketHandler customerWebSocketHandler;
 
+    @Autowired
+    private WebSocketAuthInterceptor webSocketAuthInterceptor;
+
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(kitchenBoardWebSocketHandler, "/ws/kitchen-board")
+                .addInterceptors(webSocketAuthInterceptor)
                 .setAllowedOrigins("*");
         registry.addHandler(customerWebSocketHandler, "/ws/customer")
+                .addInterceptors(webSocketAuthInterceptor)
                 .setAllowedOrigins("*");
     }
 }

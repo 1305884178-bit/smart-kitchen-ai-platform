@@ -16,10 +16,12 @@ public class CustomerWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        String query = session.getUri().getQuery();
-        if (query != null && query.contains("userId=")) {
-            String userId = query.split("userId=")[1].split("&")[0];
-            userSessions.put(userId, session);
+        // userId 由握手拦截器从 JWT 解析后写入会话属性，不再信任客户端自报
+        Object userId = session.getAttributes().get(WebSocketAuthInterceptor.ATTR_USER_ID);
+        if (userId != null) {
+            userSessions.put(String.valueOf(userId), session);
+        } else {
+            session.close(CloseStatus.NOT_ACCEPTABLE.withReason("missing authenticated userId"));
         }
     }
 

@@ -146,19 +146,22 @@ def get_prediction_results(target_date: str) -> List[Dict]:
     return results
 
 def confirm_prediction(record_id: int, final_quantity: int, confirmed_by: int) -> bool:
-    """确认/覆盖预测结果"""
+    """确认/覆盖预测结果（幂等：重复确认相同值也视为成功）"""
     conn = get_db_connection()
     success = False
     try:
         with conn.cursor() as cursor:
+            # 先确认记录存在；UPDATE 值未变化时 rowcount 为 0，不能据此判定失败
+            cursor.execute("SELECT id FROM ai_prediction_record WHERE id = %s", (record_id,))
+            if not cursor.fetchone():
+                return False
             sql = """
                 UPDATE ai_prediction_record
                 SET final_quantity = %s, status = 1, confirmed_by = %s
                 WHERE id = %s
             """
             cursor.execute(sql, (final_quantity, confirmed_by, record_id))
-            if cursor.rowcount > 0:
-                success = True
+            success = True
         conn.commit()
     except Exception as e:
         conn.rollback()

@@ -26,6 +26,14 @@ class Settings:
     embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://api.openai.com/v1")
     embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 
+    # AI 客服语义缓存：问题 embedding 与历史问题向量算余弦相似度，>= 阈值即命中
+    semantic_cache_threshold = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))
+    semantic_cache_collection = os.getenv("SEMANTIC_CACHE_COLLECTION", "ai_chat_semantic_cache")
+    # 缓存条目保鲜期（天），超期不再参与命中；知识库更新则通过 kb_version 指纹即时失效
+    semantic_cache_ttl_days = int(os.getenv("SEMANTIC_CACHE_TTL_DAYS", "7"))
+    # 知识库版本指纹在 Redis 中的缓存秒数，避免每次提问都查 MySQL
+    kb_version_cache_ttl = int(os.getenv("KB_VERSION_CACHE_TTL", "60"))
+
     weather_api_key = os.getenv("WEATHER_API_KEY", "")
     weather_city = os.getenv("WEATHER_CITY", "Shenzhen")
 

@@ -18,6 +18,7 @@
 
 .msg-left {
   flex-direction: row-reverse;
+  padding-right: 24rpx;
 }
 
 .msg-right {

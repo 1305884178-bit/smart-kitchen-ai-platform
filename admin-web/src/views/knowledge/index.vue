@@ -33,7 +33,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="生效日期">
-          <el-date-picker v-model="uploadForm.effectiveFrom" type="date" placeholder="选择日期" value-format="YYYY-MM-DD HH:mm:ss" />
+          <el-date-picker v-model="uploadForm.effectiveFrom" type="date" placeholder="选择日期" value-format="YYYY-MM-DDTHH:mm:ss" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="uploading" @click="handleUpload">上传文档</el-button>

@@ -98,29 +98,11 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
         document.setTitle(dto.getTitle() != null && !dto.getTitle().isEmpty()
                 ? dto.getTitle() : "未命名文档");
         document.setChunkCount(chunkCount);
-        document.setVersion(parseVersion(dto.getVersion()));
+        // 版本号是标签而非数值（AI 侧按字符串做 version == "v2.0" 过滤），原样保存保持前后一致
+        document.setVersion(dto.getVersion() != null && !dto.getVersion().isEmpty()
+                ? dto.getVersion() : "1.0");
         document.setStatus(dto.getStatus() != null ? dto.getStatus() : "draft");
         document.setEffectiveFrom(dto.getEffectiveFrom());
         this.save(document);
-    }
-
-    /**
-     * 将版本号字符串转换为整数（兼容 "v1.0"、"1.0"、"1" 等格式，取其中的数字部分）
-     * @param versionStr 版本号字符串
-     * @return 版本号整数，无法解析时默认返回 1
-     */
-    private int parseVersion(String versionStr) {
-        if (versionStr == null || versionStr.isEmpty()) {
-            return 1;
-        }
-        String digits = versionStr.replaceAll("[^0-9]", "");
-        if (digits.isEmpty()) {
-            return 1;
-        }
-        try {
-            return Integer.parseInt(digits);
-        } catch (NumberFormatException e) {
-            return 1;
-        }
     }
 }

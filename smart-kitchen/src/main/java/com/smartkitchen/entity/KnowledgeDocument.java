@@ -17,7 +17,7 @@ public class KnowledgeDocument {
     private Long id;
     private String title;
     private Integer chunkCount;
-    private Integer version;
+    private String version;
     private String status;
     private LocalDateTime effectiveFrom;
     private LocalDateTime createTime;

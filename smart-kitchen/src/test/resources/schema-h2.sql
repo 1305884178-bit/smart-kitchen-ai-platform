@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS `ai_knowledge_document` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增',
   `title` varchar(128) NOT NULL COMMENT '文档标题',
   `chunk_count` int NOT NULL DEFAULT '0' COMMENT '分块数',
-  `version` int NOT NULL DEFAULT '1' COMMENT '版本号',
+  `version` varchar(20) NOT NULL DEFAULT '1.0' COMMENT '版本号',
   `status` varchar(16) NOT NULL DEFAULT 'draft' COMMENT 'draft/active/archived',
   `effective_from` datetime DEFAULT NULL COMMENT '生效时间',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

@@ -49,6 +49,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private StringRedisTemplate stringRedisTemplate;
 
     @Autowired
+    private OrderMapper orderMapper;
+
+    @Autowired
     private DishMapper dishMapper;
 
     @Autowired
@@ -199,21 +202,24 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order == null) {
             throw new RuntimeException("订单不存在");
         }
+        // 应用层预校验用于友好报错，并发最终裁决由 SQL 条件更新完成
         if (order.getStatus() != OrderStatusEnum.SERVED.getCode() && order.getStatus() != OrderStatusEnum.ORDERED.getCode()) {
             throw new RuntimeException("当前状态不可结账");
         }
         if (order.getPayTime() != null) {
             throw new RuntimeException("该订单已支付，请勿重复操作");
         }
-        order.setPaymentTradeNo("SIM_" + System.currentTimeMillis());
-        order.setPayTime(LocalDateTime.now());
-        order.setUpdateTime(LocalDateTime.now());
-        if (order.getStatus() == OrderStatusEnum.SERVED.getCode()) {
-            order.setStatus(OrderStatusEnum.PAID.getCode());
-        }
-        this.updateById(order);
 
-        // 合并支付所有子订单（加菜订单）
+        String paymentTradeNo = "SIM_" + System.currentTimeMillis();
+        LocalDateTime payTime = LocalDateTime.now();
+        int affected = orderMapper.markPaidIfUnpaid(orderId, paymentTradeNo, payTime,
+                OrderStatusEnum.ORDERED.getCode(), OrderStatusEnum.SERVED.getCode(), OrderStatusEnum.PAID.getCode());
+        if (affected == 0) {
+            // 并发下另一事务已先完成支付/状态变更
+            throw new RuntimeException("订单状态已变更或已支付，请刷新后重试");
+        }
+
+        // 合并支付所有子订单（加菜订单），同一事务内同样走条件更新
         List<Order> childOrders = this.lambdaQuery()
                 .eq(Order::getParentOrderId, orderId)
                 .list();
@@ -222,13 +228,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             if (child.getStatus() == OrderStatusEnum.ORDERED.getCode()
                     || child.getStatus() == OrderStatusEnum.SERVED.getCode()) {
                 childIndex++;
-                child.setPaymentTradeNo(order.getPaymentTradeNo() + "_" + childIndex);
-                child.setPayTime(order.getPayTime());
-                child.setUpdateTime(LocalDateTime.now());
-                if (child.getStatus() == OrderStatusEnum.SERVED.getCode()) {
-                    child.setStatus(OrderStatusEnum.PAID.getCode());
+                int childAffected = orderMapper.markPaidIfUnpaid(child.getId(),
+                        paymentTradeNo + "_" + childIndex, payTime,
+                        OrderStatusEnum.ORDERED.getCode(), OrderStatusEnum.SERVED.getCode(), OrderStatusEnum.PAID.getCode());
+                if (childAffected == 0) {
+                    throw new RuntimeException("子订单状态已变更，请刷新后重试");
                 }
-                this.updateById(child);
             }
         }
     }
@@ -240,6 +245,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order == null) {
             throw new RuntimeException("订单不存在");
         }
+        // 应用层预校验用于友好报错，并发最终裁决由 SQL 条件更新完成
         if (order.getStatus() != OrderStatusEnum.ORDERED.getCode() && order.getStatus() != OrderStatusEnum.SERVED.getCode()) {
             throw new RuntimeException("当前状态不可撤销");
         }
@@ -247,10 +253,11 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 只有未出餐的订单撤销才返还库存
         boolean shouldReturnStock = order.getStatus() == OrderStatusEnum.ORDERED.getCode();
 
-        order.setStatus(OrderStatusEnum.CANCELLED.getCode());
-        order.setCancelReason("用户/管理员撤销");
-        order.setUpdateTime(LocalDateTime.now());
-        this.updateById(order);
+        int affected = orderMapper.cancelIfActive(orderId, "用户/管理员撤销",
+                OrderStatusEnum.ORDERED.getCode(), OrderStatusEnum.SERVED.getCode(), OrderStatusEnum.CANCELLED.getCode());
+        if (affected == 0) {
+            throw new RuntimeException("订单状态已变更，请刷新后重试");
+        }
 
         if (shouldReturnStock) {
             returnStockForOrder(orderId);
@@ -263,14 +270,16 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         for (Order child : childOrders) {
             if (child.getStatus() == OrderStatusEnum.ORDERED.getCode()
                     || child.getStatus() == OrderStatusEnum.SERVED.getCode()) {
+                int childAffected = orderMapper.cancelIfActive(child.getId(), "父订单已撤销",
+                        OrderStatusEnum.ORDERED.getCode(), OrderStatusEnum.SERVED.getCode(), OrderStatusEnum.CANCELLED.getCode());
+                if (childAffected == 0) {
+                    // 子订单被并发操作抢先变更，由对方操作负责其库存语义，跳过即可
+                    continue;
+                }
                 // 子订单未出餐才返还库存
                 if (child.getStatus() == OrderStatusEnum.ORDERED.getCode()) {
                     returnStockForOrder(child.getId());
                 }
-                child.setStatus(OrderStatusEnum.CANCELLED.getCode());
-                child.setCancelReason("父订单已撤销");
-                child.setUpdateTime(LocalDateTime.now());
-                this.updateById(child);
             }
         }
     }
@@ -333,18 +342,18 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order == null) {
             throw new RuntimeException("订单不存在");
         }
+        // 应用层预校验用于友好报错，并发最终裁决由 SQL 条件更新完成
         if (order.getStatus() != OrderStatusEnum.ORDERED.getCode()) {
             throw new RuntimeException("当前状态不可操作出餐");
         }
         // 若顾客已提前支付，出餐后自动流转到 PAID
-        if (order.getPayTime() != null) {
-            order.setStatus(OrderStatusEnum.PAID.getCode());
-        } else {
-            order.setStatus(OrderStatusEnum.SERVED.getCode());
+        int newStatus = order.getPayTime() != null
+                ? OrderStatusEnum.PAID.getCode()
+                : OrderStatusEnum.SERVED.getCode();
+        int affected = orderMapper.serveIfOrdered(orderId, newStatus, LocalDateTime.now(), OrderStatusEnum.ORDERED.getCode());
+        if (affected == 0) {
+            throw new RuntimeException("订单状态已变更，请刷新后重试");
         }
-        order.setCompleteTime(LocalDateTime.now());
-        order.setUpdateTime(LocalDateTime.now());
-        this.updateById(order);
 
         customerWebSocketHandler.sendMessageToUser(order.getUserId(), "{\"type\":\"ORDER_SERVED\",\"message\":\"您的订单已出餐，请取餐\"}");
     }
