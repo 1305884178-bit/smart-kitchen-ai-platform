@@ -6,7 +6,38 @@ const request = axios.create({
   timeout: 15000,
 })
 
-// 请求拦截器：自动注入 Authorization
+let refreshing = null
+
+function persistTokens(token, refreshToken) {
+  if (token) {
+    localStorage.setItem('token', token)
+  }
+  if (refreshToken) {
+    localStorage.setItem('refreshToken', refreshToken)
+  }
+}
+
+function clearLocalAuth() {
+  localStorage.removeItem('token')
+  localStorage.removeItem('refreshToken')
+  localStorage.removeItem('role')
+  localStorage.removeItem('userId')
+}
+
+async function refreshAccessToken() {
+  const refreshToken = localStorage.getItem('refreshToken')
+  if (!refreshToken) {
+    throw new Error('no refresh token')
+  }
+  const res = await axios.post('/api/auth/refresh', { refreshToken })
+  if (!res.data || res.data.code !== 200) {
+    throw new Error((res.data && res.data.message) || 'refresh failed')
+  }
+  const data = res.data.data
+  persistTokens(data.token, data.refreshToken)
+  return data.token
+}
+
 request.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token')
@@ -15,35 +46,50 @@ request.interceptors.request.use(
     }
     return config
   },
-  (error) => {
-    return Promise.reject(error)
-  }
+  (error) => Promise.reject(error)
 )
 
-// 响应拦截器：统一错误处理
 request.interceptors.response.use(
   (response) => {
     const res = response.data
-    // 后端 Result 统一响应：code !== 200 视为业务异常
     if (res.code !== 200) {
       ElMessage.error(res.message || '请求失败')
       return Promise.reject(new Error(res.message || '请求失败'))
     }
     return res
   },
-  (error) => {
-    if (error.response) {
-      const { status, data } = error.response
+  async (error) => {
+    const { config, response } = error
+    if (response) {
+      const { status, data } = response
+      if (status === 401 && config && !config.skipAuthRefresh && !config._retry) {
+        config._retry = true
+        try {
+          if (!refreshing) {
+            refreshing = refreshAccessToken().finally(() => {
+              refreshing = null
+            })
+          }
+          const newToken = await refreshing
+          config.headers.Authorization = `Bearer ${newToken}`
+          return request(config)
+        } catch (e) {
+          clearLocalAuth()
+          ElMessage.error('登录已过期，请重新登录')
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login'
+          }
+          return Promise.reject(error)
+        }
+      }
       if (status === 401) {
-        // Token 过期或未登录
-        localStorage.removeItem('token')
-        localStorage.removeItem('role')
-        localStorage.removeItem('userId')
+        clearLocalAuth()
         ElMessage.error('登录已过期，请重新登录')
-        // 跳转登录页（避免在登录页重复跳转）
         if (window.location.pathname !== '/login') {
           window.location.href = '/login'
         }
+      } else if (status === 403) {
+        ElMessage.error((data && data.message) || '无权限访问')
       } else {
         const msg = (data && data.message) || `服务器错误(${status})`
         ElMessage.error(msg)

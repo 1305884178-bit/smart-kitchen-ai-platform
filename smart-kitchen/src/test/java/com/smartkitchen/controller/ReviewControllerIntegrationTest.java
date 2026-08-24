@@ -52,8 +52,8 @@ public class ReviewControllerIntegrationTest {
 
     @BeforeEach
     public void setup() {
-        customerToken = jwtUtil.generateToken(1001L, "oX123456789", "CUSTOMER");
-        adminToken = jwtUtil.generateToken(1L, "admin", "ADMIN");
+        customerToken = jwtUtil.generateToken(1001L, "CUSTOMER", "oX123456789");
+        adminToken = jwtUtil.generateToken(1L, "ADMIN", "admin");
 
         Order paidOrder = new Order();
         paidOrder.setOrderNo(UUID.randomUUID().toString().replace("-", ""));

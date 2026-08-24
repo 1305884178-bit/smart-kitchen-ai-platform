@@ -3,6 +3,8 @@ package com.smartkitchen.controller;
 import com.smartkitchen.common.Result;
 import com.smartkitchen.dto.LoginDTO;
 import com.smartkitchen.dto.LoginVO;
+import com.smartkitchen.dto.LogoutDTO;
+import com.smartkitchen.dto.RefreshTokenDTO;
 import com.smartkitchen.dto.WxLoginDTO;
 import com.smartkitchen.dto.WxRegisterDTO;
 import com.smartkitchen.service.UserService;
@@ -52,6 +54,25 @@ public class AuthController {
     @PostMapping("/login")
     public Result<LoginVO> login(@RequestBody LoginDTO loginDTO) {
         return Result.success(userService.login(loginDTO));
+    }
+
+    /**
+     * 用 Refresh Token 换发新的 Access / Refresh Token
+     */
+    @PostMapping("/refresh")
+    public Result<LoginVO> refresh(@RequestBody RefreshTokenDTO dto) {
+        return Result.success(userService.refresh(dto.getRefreshToken()));
+    }
+
+    /**
+     * 登出：Access Token 拉入黑名单，Refresh Token 从 Redis 删除
+     */
+    @PostMapping("/logout")
+    public Result<Void> logout(HttpServletRequest request, @RequestBody(required = false) LogoutDTO dto) {
+        String refreshToken = dto == null ? null : dto.getRefreshToken();
+        boolean allDevices = dto != null && Boolean.TRUE.equals(dto.getAllDevices());
+        userService.logout(request.getHeader("Authorization"), refreshToken, allDevices);
+        return Result.success();
     }
 
     /**

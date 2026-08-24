@@ -42,7 +42,7 @@ public class AdminKnowledgeControllerIntegrationTest {
 
     @BeforeEach
     public void setup() {
-        token = jwtUtil.generateToken(1L, "admin", "ADMIN");
+        token = jwtUtil.generateToken(1L, "ADMIN", "admin");
     }
 
     @Test

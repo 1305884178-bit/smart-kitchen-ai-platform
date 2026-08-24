@@ -32,6 +32,9 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
     @Autowired
     private JwtUtil jwtUtil;
 
+    @Autowired
+    private TokenStore tokenStore;
+
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                    WebSocketHandler wsHandler, Map<String, Object> attributes) {
@@ -48,9 +51,17 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
         }
 
         Claims claims = jwtUtil.parseToken(token);
+        if (!jwtUtil.isAccessToken(claims) || tokenStore.isBlacklisted(claims.getId())) {
+            reject(response, HttpStatus.UNAUTHORIZED);
+            return false;
+        }
         Long userId = claims.get("userId", Long.class);
         String role = claims.get("role", String.class);
         if (userId == null || role == null) {
+            reject(response, HttpStatus.UNAUTHORIZED);
+            return false;
+        }
+        if (tokenStore.isUserRevoked(userId, jwtUtil.issuedAtMillis(claims))) {
             reject(response, HttpStatus.UNAUTHORIZED);
             return false;
         }

@@ -49,16 +49,33 @@ function request(url, options = {}) {
       success: (res) => {
         if (showLoading) wx.hideLoading();
 
-        // 401 未授权：清除 token，触发重新登录
+        // 401：先尝试 refresh，失败再清登录态并走微信重登
         if (res.statusCode === 401) {
-          wx.removeStorageSync('token');
-          app.globalData.isLoggedIn = false;
-          if (showError) {
-            wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' });
+          if (options._retry) {
+            wx.removeStorageSync('token');
+            wx.removeStorageSync('refreshToken');
+            app.globalData.isLoggedIn = false;
+            if (showError) {
+              wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' });
+            }
+            app.checkLogin();
+            reject({ code: 401, message: 'Unauthorized' });
+            return;
           }
-          // 自动触发登录流程：老用户静默换 token，新用户跳转注册页
-          app.checkLogin();
-          reject({ code: 401, message: 'Unauthorized' });
+          app._tryRefresh().then((ok) => {
+            if (ok) {
+              request(url, { ...options, _retry: true }).then(resolve).catch(reject);
+            } else {
+              wx.removeStorageSync('token');
+              wx.removeStorageSync('refreshToken');
+              app.globalData.isLoggedIn = false;
+              if (showError) {
+                wx.showToast({ title: '登录已过期，请重新登录', icon: 'none' });
+              }
+              app.checkLogin();
+              reject({ code: 401, message: 'Unauthorized' });
+            }
+          });
           return;
         }
 

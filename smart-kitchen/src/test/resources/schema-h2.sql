@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS `sys_user` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `openid` varchar(64) DEFAULT NULL COMMENT '微信openid（微信用户凭此登录）',
   `username` varchar(32) DEFAULT NULL COMMENT '登录账号（仅管理员/PC端使用，微信用户留空）',
-  `password` varchar(128) DEFAULT NULL COMMENT '密码（仅管理员/PC端使用，微信用户留空）',
+  `password` varchar(128) DEFAULT NULL COMMENT '密码 BCrypt 哈希（仅管理员/PC端使用，微信用户留空）',
   `phone` varchar(16) DEFAULT NULL COMMENT '手机号',
   `nickname` varchar(32) DEFAULT NULL COMMENT '昵称',
   `avatar` varchar(256) DEFAULT NULL COMMENT '头像',

@@ -20,7 +20,9 @@ App({
       header: { 'Authorization': `Bearer ${token}` },
       success: (res) => {
         if (res.statusCode === 401 || res.data?.code !== 200) {
-          this._clearAuth();
+          this._tryRefresh().then((ok) => {
+            if (!ok) this._clearAuth();
+          });
         } else {
           const { userId, role } = res.data.data || {};
           this.globalData.isLoggedIn = true;
@@ -35,11 +37,54 @@ App({
     });
   },
 
+  _saveAuth(data) {
+    if (data?.token) {
+      wx.setStorageSync('token', data.token);
+    }
+    if (data?.refreshToken) {
+      wx.setStorageSync('refreshToken', data.refreshToken);
+    }
+    this.globalData.isLoggedIn = true;
+    if (data?.userId) {
+      this.globalData.userId = data.userId;
+      this.globalData.role = data.role;
+      this.globalData.userInfo = { userId: data.userId, role: data.role };
+    }
+  },
+
+  /**
+   * Access Token 过期时用 Refresh Token 换发
+   * @returns {Promise<boolean>}
+   */
+  _tryRefresh() {
+    const refreshToken = wx.getStorageSync('refreshToken');
+    if (!refreshToken) {
+      return Promise.resolve(false);
+    }
+    return new Promise((resolve) => {
+      wx.request({
+        url: `${this.globalData.apiBase}/api/auth/refresh`,
+        method: 'POST',
+        data: { refreshToken },
+        success: (res) => {
+          if (res.statusCode === 200 && res.data?.code === 200 && res.data.data?.token) {
+            this._saveAuth(res.data.data);
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        },
+        fail: () => resolve(false)
+      });
+    });
+  },
+
   /**
    * 清除登录态
    */
   _clearAuth() {
     wx.removeStorageSync('token');
+    wx.removeStorageSync('refreshToken');
     wx.removeStorageSync('userInfo');
     this.globalData.isLoggedIn = false;
   },
@@ -62,11 +107,10 @@ App({
             data: { code: loginRes.code },
             success: (res) => {
               if (res.statusCode === 200 && res.data?.code === 200) {
-                const token = res.data.data?.token;
-                if (token) {
-                  wx.setStorageSync('token', token);
-                  this.globalData.isLoggedIn = true;
-                  resolve(token);
+                const data = res.data.data || {};
+                if (data.token) {
+                  this._saveAuth(data);
+                  resolve(data.token);
                 } else {
                   // 新用户需要注册
                   resolve(null);

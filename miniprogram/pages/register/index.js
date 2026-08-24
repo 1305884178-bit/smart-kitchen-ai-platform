@@ -67,9 +67,12 @@ Page({
           success: (res) => {
             this.setData({ submitting: false });
             if (res.statusCode === 200 && res.data?.code === 200) {
-              const token = res.data.data?.token;
-              if (token) {
-                wx.setStorageSync('token', token);
+              const data = res.data.data || {};
+              if (data.token) {
+                wx.setStorageSync('token', data.token);
+                if (data.refreshToken) {
+                  wx.setStorageSync('refreshToken', data.refreshToken);
+                }
                 app.globalData.isLoggedIn = true;
                 wx.showToast({ title: '注册成功', icon: 'success' });
                 setTimeout(() => {

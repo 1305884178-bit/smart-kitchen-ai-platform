@@ -61,7 +61,8 @@ mybatis-plus:
 smart-kitchen:
   jwt:
     secret: ${JWT_SECRET:smartKitchenSecretKeyPleaseChangeInProdEnv}
-    expiration: 86400000 # 24 hours
+    access-expiration: ${JWT_ACCESS_EXPIRATION:7200000} # Access Token 2 hours
+    refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000} # Refresh Token 7 days
   python-service:
     url: ${PYTHON_API_URL:http://localhost:8000}
   wechat:

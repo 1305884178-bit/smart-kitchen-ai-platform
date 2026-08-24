@@ -205,7 +205,7 @@ src/
 | id | bigint PK AI | 自增 |
 | openid | varchar(64) UNIQUE | 微信 openid（C 端登录凭证） |
 | username | varchar(32) UNIQUE | 账号（B 端管理员使用） |
-| password | varchar(128) | 密码（B 端管理员使用） |
+| password | varchar(128) | BCrypt 哈希（B 端管理员使用；微信用户为空） |
 | phone | varchar(16) | 手机号 |
 | nickname | varchar(32) | 昵称 |
 | avatar | varchar(256) | 头像 |
@@ -374,10 +374,12 @@ ORDERED(0)
 
 | 方法 | 路径 | 入参 | 响应 data | 说明 |
 |------|------|------|-----------|------|
-| POST | `/api/auth/wx-login` | `{ code }` | `{ token, userId, role, needRegister }` | 微信免密登录，新用户 `needRegister=true`（无 token） |
-| POST | `/api/auth/register` | `{ code, nickname, avatar, phone }` | `{ token, userId, role }` | 新用户注册并绑定微信 |
-| POST | `/api/auth/login` | `{ username, password }` | `{ token, userId, role }` | 账密登录（B 端管理员） |
-| GET | `/api/auth/check-token` | Header token | 用户信息 | 小程序启动时校验登录态 |
+| POST | `/api/auth/wx-login` | `{ code }` | `{ token, refreshToken, userId, role, needRegister }` | 微信免密登录，新用户 `needRegister=true`（无 token） |
+| POST | `/api/auth/register` | `{ code, nickname, avatar, phone }` | `{ token, refreshToken, userId, role }` | 新用户注册并绑定微信 |
+| POST | `/api/auth/login` | `{ username, password }` | `{ token, refreshToken, userId, role }` | 账密登录（B 端管理员，密码 BCrypt 校验） |
+| POST | `/api/auth/refresh` | `{ refreshToken }` | `{ token, refreshToken, userId, role }` | 刷新双 Token，旧 Refresh 立即失效（旋转） |
+| POST | `/api/auth/logout` | Header Access Token，body `{ refreshToken?, allDevices? }` | — | Access 拉入 Redis 黑名单；可选删除 Refresh / 全端吊销 |
+| GET | `/api/auth/check-token` | Header token | 用户信息 | 小程序启动时校验 Access Token（含黑名单） |
 
 #### 座位 SeatController `/api/seat`
 
@@ -518,13 +520,18 @@ ORDERED(0)
 
 ## 8. 核心机制设计
 
-### 8.1 JWT 鉴权
+### 8.1 JWT 鉴权（Access + Refresh + 黑名单）
 
-- HS256 签名；载荷含 `userId`、`role`；有效期 24h（`smart-kitchen.jwt.expiration=86400000` ms）。
-- `JwtInterceptor` 拦截 `/api/**`，从 `Authorization: Bearer` 解析；失败返回 401 JSON。
-- 解析结果写入 `UserContext`（ThreadLocal），业务代码经 `UserContext.getUserId()` 获取当前用户；`afterCompletion` 清理防内存泄漏。
+- HS256 签名；载荷含 `userId`、`role`、`tokenType`（`access` / `refresh`）、`jti`。
+- **Access Token** 有效期 2h（`smart-kitchen.jwt.access-expiration=7200000`）；**Refresh Token** 有效期 7 天（`refresh-expiration=604800000`）。业务接口只接受 Access Token。
+- Refresh Token 登录时写入 Redis 白名单 `auth:refresh:{jti}`（测试 profile 用内存实现）；`/api/auth/refresh` 校验白名单后**旋转**：删旧 Refresh、签发新双 Token。
+- 登出将 Access 的 `jti` 写入 Redis 黑名单 `auth:blacklist:{jti}`，TTL = Access 剩余寿命；`allDevices=true` 时写入 `auth:revoke:{userId}` 吊销该用户此前签发的全部 Access。
+- `JwtInterceptor` 拦截 `/api/**`：验签 → 必须是 access → 未进黑名单 → 未被用户级吊销；失败返回 **HTTP 401** JSON。
+- **角色校验**：`/api/admin/**`、`/api/kitchen-board/**`、`/api/order/admin-list`、`/api/order/admin-detail/**`、`/api/order/{id}/cancel|complete` 要求 `role=ADMIN`，否则 **HTTP 403**（与厨房看板 WebSocket 一致，后端强制，不依赖前端路由守卫）。
+- 解析结果写入 `UserContext`（ThreadLocal）；`afterCompletion` 清理。`preHandle` 返回 false 时不调用 `afterCompletion`，失败路径不写入上下文故无需清理。
 - 放行：`/api/auth/**`、`/api/seat/**`、`/api/proxy/**`、`/error`。
-- WebSocket 不走 HTTP 拦截器，改由 `WebSocketAuthInterceptor` 在握手阶段校验 `?token=`（详见 7.4）。
+- WebSocket 不走 HTTP 拦截器，由 `WebSocketAuthInterceptor` 握手校验 `?token=`（须为未拉黑的 Access Token；`/ws/kitchen-board` 另需 ADMIN，详见 7.4）。
+- B 端管理员密码使用 **BCrypt** 存储；登录兼容历史明文并在校验成功后升级为哈希。
 
 ### 8.2 库存扣减（Redis + Lua + MySQL 双写）
 
@@ -665,7 +672,9 @@ START ─┬─→ get_sales_30d ──→ time_series_predict ─┐
 | `spring.datasource.*` | MySQL（`${DB_HOST}:3306/smart_kitchen`，Hikari 池 5–20） | localhost |
 | `spring.data.redis.*` | Redis 连接（Lettuce 池） | localhost:6379 |
 | `spring.rabbitmq.*` | MQ 连接 + publisher-confirm/returns | localhost:5672 |
-| `smart-kitchen.jwt.secret` / `jwt.expiration` | JWT 密钥 / 有效期 ms | — / 86400000 |
+| `smart-kitchen.jwt.secret` | JWT HMAC 密钥 | 环境变量 |
+| `smart-kitchen.jwt.access-expiration` | Access Token 有效期 ms | 7200000（2h） |
+| `smart-kitchen.jwt.refresh-expiration` | Refresh Token 有效期 ms | 604800000（7d） |
 | `smart-kitchen.python-service.url` | Python 服务地址 | `http://localhost:8000` |
 | `smart-kitchen.wechat.app-id/app-secret` | 微信小程序凭证 | 环境变量 |
 | `smart-kitchen.oss.*` | OSS endpoint / bucket / AK | 环境变量 |
@@ -696,7 +705,7 @@ START ─┬─→ get_sales_30d ──→ time_series_predict ─┐
 
 | 层 | 内容 | 位置 |
 |----|------|------|
-| Java 集成测试 | 12 个 Controller 集成测试（认证/座位/分类/菜品/代理/订单/评价/库存/知识库/预测/Phase6 接口） | `smart-kitchen/src/test/.../controller/` |
+| Java 集成测试 | Controller 集成测试（认证含 BCrypt/双 Token/黑名单/ADMIN 403、座位/分类/菜品/代理/订单/评价/库存/知识库/预测/Phase6 接口），合计 71 项 | `smart-kitchen/src/test/.../controller/` |
 | Java 单元测试 | `CategoryServiceTest`、`OrderTimeoutConsumerTest`（正常超时取消、已支付跳过、已撤销跳过、订单不存在、异常 Nack 进 DLQ） | `.../service/` |
 | Java 并发测试 | `OrderServiceConcurrencyTest`（CountDownLatch 多线程并发支付/出餐/支付vs撤销竞争，断言条件更新恰好一笔生效）、`OrderServiceSubmitRollbackTest`（MySQL 扣减返回 0 → 订单不落库 + Redis 回滚脚本执行） | `.../service/` |
 | WebSocket 鉴权测试 | `WebSocketAuthInterceptorTest`（合法/缺失/非法 token、越权连看板、会话按 token userId 绑定） | `.../config/` |

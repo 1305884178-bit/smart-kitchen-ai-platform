@@ -142,7 +142,8 @@
   - 订单状态迁移乐观锁下沉——`payOrder`/`cancelOrder`/`serveOrder` 改为 SQL 条件更新（`WHERE id=? AND status IN (...) [AND pay_time IS NULL]`），影响行数 0 即并发冲突报错，堵住先查后改窗口（`OrderServiceConcurrencyTest`：20 线程并发支付/出餐/支付 vs 撤销竞争，断言恰好一笔生效）；
   - 下单中途失败补偿测试（`OrderServiceSubmitRollbackTest`：mock `deductStock` 返回 0，断言订单不落库且 Redis 回滚脚本执行）；
   - 接口级压测（`tests/load_order_submit.py`：50 线程并发抢库存 20，实测 20 成功 30 拒绝、Redis/MySQL 双侧库存恰好为 0）；
-  - WebSocket 握手 JWT 鉴权（`WebSocketAuthInterceptor`：`/ws/kitchen-board` 需 ADMIN，`/ws/customer` 的 userId 改为 token 解析，`WebSocketAuthInterceptorTest` 6 项断言）。
+  - WebSocket 握手 JWT 鉴权（`WebSocketAuthInterceptor`：`/ws/kitchen-board` 需 ADMIN，`/ws/customer` 的 userId 改为 token 解析，`WebSocketAuthInterceptorTest` 6 项断言）；
+  - **认证加固**：BCrypt 密码哈希；HTTP 拦截器对管理端接口强制 ADMIN（403）；Access（2h）+ Refresh（7d）双 Token、Redis 黑名单与刷新旋转、全端吊销；管理端/小程序 401 时静默 refresh；`AuthControllerIntegrationTest` 6 项 + `PasswordEncoderTest` 全过（Java 合计 71 项）。
 - [ ] API 文档梳理（Swagger / Knife4j）。
 - [ ] 前端生产构建与 Nginx 配置（admin-web 静态托管 + `/api`、`/ws` 反向代理）。
 - [ ] **Docker 统一部署（待完成）**：编写各服务 Dockerfile 与根目录 `docker-compose.yml`，将 MySQL、Redis、RabbitMQ、Java 后端、Python AI 服务、admin-web（Nginx）统一容器化编排；Milvus Lite 数据文件挂载持久卷；密钥经 `.env` 注入。当前仅有 `smart-kitchen-ai/Dockerfile` 占位空文件。

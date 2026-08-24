@@ -29,7 +29,7 @@ public class CategoryControllerIntegrationTest {
 
     @BeforeEach
     public void setup() {
-        token = jwtUtil.generateToken(1000L, null, "ADMIN");
+        token = jwtUtil.generateToken(1000L, "ADMIN", "admin");
     }
 
     @Test

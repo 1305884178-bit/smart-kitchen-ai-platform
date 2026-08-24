@@ -18,4 +18,15 @@ public interface UserService extends IService<User> {
      * @return 用户登录信息（userId、role）
      */
     LoginVO checkToken(String authHeader);
+
+    /**
+     * 用 Refresh Token 换发新的 Access / Refresh Token（旧 Refresh 立即失效）。
+     */
+    LoginVO refresh(String refreshToken);
+
+    /**
+     * 登出：将当前 Access Token 拉黑，并删除 Refresh Token。
+     * @param allDevices true 时吊销该用户全部设备
+     */
+    void logout(String authHeader, String refreshToken, boolean allDevices);
 }

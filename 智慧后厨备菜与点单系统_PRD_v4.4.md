@@ -1,6 +1,6 @@
 # 智慧后厨备菜与点单系统 产品需求文档（PRD）
 
-> 版本：v5.0
+> 版本：v5.2
 > 说明：接口级技术细节见《技术规格说明书》（spec.md），迭代过程见《开发计划》（plan.md）。
 
 ---
@@ -13,6 +13,7 @@
 | v1.0–v4.7 | 2026-07 ~ 2026-08 | 开发过程中的迭代版本：明确技术选型、确立「先做后付」业务模式、简化状态机、确定 LangGraph 单工作流架构、补充前端范围                          |
 | v5.0      | 2026-08-17        | 加菜改为父子订单模型、结账改为「先登记后流转」、WebSocket 事件模型按实际推送口径修订、知识库改为文本录入 + 文件解析上传、预测工作流按并行图结构修订、删除过程性内容 |
 | v5.1      | 2026-08-17        | 订单状态迁移改为「应用层预校验 + SQL 条件更新最终裁决」；WebSocket 握手增加 JWT 鉴权（看板限 ADMIN，顾客 userId 以 token 解析为准）；MQ 消费异常口径修订为 Nack 进兜底 DLQ |
+| v5.2      | 2026-08-24        | 认证加固：管理员密码改为 BCrypt；HTTP 拦截器对管理端接口强制 ADMIN（403）；Access/Refresh 双 Token + Redis 黑名单/刷新旋转/全端吊销 |
 
 
 ---
@@ -433,10 +434,12 @@ C 端小程序「AI 客服」Tab，基于 LangGraph ReAct Agent，挂载 3 个�
 
 ### 5.3 安全
 
-- 除登录、注册、座位查询外的全部接口要求 JWT（`Authorization: Bearer <token>`）。
-- WebSocket 握手同样强制鉴权：连接 URL 携带 `?token=`，握手拦截器校验 JWT，厨房看板仅 ADMIN 可连，顾客端会话 userId 以 token 解析为准（不信任客户端自报）。
-- JWT 载荷含 `userId` 与 `role`；顾客端数据查询强制按 `userId` 过滤，防越权。
-- 管理端页面路由守卫校验 ADMIN 角色。
+- 除登录、注册、刷新、登出、座位查询外的全部接口要求 **Access Token**（`Authorization: Bearer <token>`）。Refresh Token 只能调用 `/api/auth/refresh`。
+- 登录签发双 Token：Access 2 小时、Refresh 7 天。Refresh 存在 Redis 白名单；登出将 Access `jti` 拉入 Redis 黑名单（TTL = 剩余寿命），与票面过期对齐。
+- B 端密码以 **BCrypt** 哈希存储，不存明文。
+- HTTP 拦截器在验签之外，对管理端路径（`/api/admin/**`、厨房看板、订单管理/撤销/出餐）强制 `role=ADMIN`，否则 403。前端路由守卫只做体验，真正权限在后端。
+- WebSocket 握手同样强制鉴权：连接 URL 携带 `?token=`（须为未拉黑的 Access Token），厨房看板仅 ADMIN 可连，顾客端会话 userId 以 token 解析为准（不信任客户端自报）。
+- JWT 载荷含 `userId`、`role`、`tokenType`、`jti`；顾客端数据查询强制按 `userId` 过滤，防越权。
 - 密钥类配置（数据库、Redis、JWT Secret、微信 AppSecret、OSS、LLM Key）均通过环境变量注入，不入库不入库版本控制。
 
 

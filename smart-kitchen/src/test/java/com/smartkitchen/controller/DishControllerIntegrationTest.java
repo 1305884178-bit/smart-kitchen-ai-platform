@@ -39,7 +39,7 @@ public class DishControllerIntegrationTest {
 
     @BeforeEach
     public void setup() {
-        token = jwtUtil.generateToken(1001L, "oX123456789", "CUSTOMER");
+        token = jwtUtil.generateToken(1001L, "CUSTOMER", "oX123456789");
     }
 
     @Test
