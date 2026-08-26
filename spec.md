@@ -344,7 +344,7 @@ ORDERED(0)
 **规则**：
 
 - 状态迁移采用「应用层预校验 + SQL 条件更新最终裁决」：Service 先校验当前状态给出友好报错，真正写入用条件 UPDATE（`WHERE id=? AND status IN (...)`，支付另加 `pay_time IS NULL`），影响行数 0 即被并发抢先，报错提示——与库存扣减 `daily_stock >= ?` 同一思想，由数据库原子操作堵住先查后改窗口。
-- 撤销：仅 `ORDERED` 返还库存（Redis `return_stock.lua` + MySQL 加回）；`SERVED` 不返还；级联撤销全部子订单。
+- 撤销：仅 `ORDERED` 返还库存（先 MySQL 原子加回，再 Redis `return_stock.lua`；key 缺失时写回返还后的 DB 库存）；`SERVED` 不返还；级联撤销全部子订单。
 - 结账幂等：`pay_time` 非空拒绝重复支付（含条件更新兜底）；`payment_trade_no` 唯一索引兜底。
 
 ### 6.2 父子订单合并规则（C 端视图）
@@ -535,16 +535,15 @@ ORDERED(0)
 
 ### 8.2 库存扣减（Redis + Lua + MySQL 双写）
 
-**扣减脚本 `scripts/deduct_stock.lua`**：先遍历全部 key 校验库存（key 不存在或库存 < 需求量时返回 `-i`，i 为首个不足的菜品序号），全部通过后再逐个 `DECRBY`，成功返回 `1`——「先检后扣」保证原子性，不会扣一半。
+**扣减脚本 `scripts/deduct_stock.lua`**：ARGV 约定为 `ARGV[1..n]=数量`、`ARGV[n+1..2n]=初值`（`n=#KEYS`）。对每个 key：若不存在则用对应初值参与校验；全部菜品库存都够才逐个写入初值（仅 key 不存在时）并 `DECRBY`，有一个不够则返回 `-i` 且全部不扣——初始化、校验、扣减在同一段 Lua 内完成，避免 Java 侧 `hasKey` + `set` 竞态超卖。
 
-**回滚脚本 `scripts/return_stock.lua`**：对每个 key `INCRBY` 对应数量。
+**回滚/返还脚本 `scripts/return_stock.lua`**：ARGV 同样为数量 + 返还后的 DB 库存。key 存在则 `INCRBY` 返还数量；key 不存在则 `SET` 为调用方传入的「返还后 MySQL `daily_stock`」，避免管理员 `DEL` 后 `INCRBY` 从 0 起跳变成「仅本次返还量」。
 
 **下单链路**：
 
 ```
 逐菜品校验（下架菜：不计价不扣库存，名称标记「（已下架）」）
-  → Redis key dish:stock:{dishId} 不存在则以 pms_dish.daily_stock 初始化
-  → 执行 deduct_stock.lua（不足则报错并指明菜品）
+  → 执行 deduct_stock.lua（传入每道菜 qty + dish.dailyStock 初值；不足则报错并指明菜品）
   → 落库订单 + 明细
   → MySQL 同步扣减：UPDATE pms_dish SET daily_stock = daily_stock - ? WHERE id = ? AND daily_stock >= ?
      （affectedRows = 0 视为失败）
@@ -552,6 +551,7 @@ ORDERED(0)
   → 成功：WS 推看板 NEW_ORDER + MQ 发延迟消息
 ```
 
+**撤销返还**：先 MySQL `UPDATE ... SET daily_stock = daily_stock + ?`（原子加回），再执行 `return_stock.lua`（带返还量与加完后的 DB 库存）。
 ### 8.3 WebSocket 实时推送
 
 - 两个 Handler：`KitchenBoardWebSocketHandler`（单会话广播）、`CustomerWebSocketHandler`（按 userId 定向）。
@@ -635,7 +635,7 @@ START ─┬─→ get_sales_30d ──→ time_series_predict ─┐
   - **存储**：Milvus Lite 独立集合 `ai_chat_semantic_cache`（与 `kitchen_knowledge` 同库不同集合），条目 = 问题向量（百炼 embedding，1024 维）+ 回答 + `kb_version` 指纹 + `created_at`。
   - **命中**：问题转 embedding 后向量检索 Top-1，余弦相似度 ≥ `SEMANTIC_CACHE_THRESHOLD`（默认 0.92）即命中，差字/标点/语序不再导致 miss；命中时按 10 字符切片 + `asyncio.sleep(0.01)` 模拟流式，不调 LLM。
   - **只缓存非动态回答**：流式过程中监听 `on_tool_start`，调用了实时数据工具（`check_dish_inventory` / `get_dish_ingredients`，回调 Java 查 MySQL）的回答不写入，避免向其他用户散发过期库存；纯知识问答与 RAG 推荐（`search_dish_by_preference` 查知识库）可缓存。
-  - **失效**：`kb_version` = `ai_knowledge_document` 全表 `(id, version, status)` 的哈希指纹（Redis 缓存 60s），知识库新增/归档/改版后旧条目因 filter 不匹配自动失效；另有 `SEMANTIC_CACHE_TTL_DAYS`（默认 7 天）保鲜期。
+  - **失效**：`kb_version` = `ai_knowledge_document` 全表 `(id, version, status)` 的哈希指纹（Redis 缓存 60s TTL 作兜底）；Java 侧 `KnowledgeDocumentService.saveDocument` 在 MySQL 元数据写入成功后主动 `DEL kb_version_fingerprint`，知识库新增/改版后下次 lookup 立即重算指纹，旧条目因 filter 不匹配自动失效；另有 `SEMANTIC_CACHE_TTL_DAYS`（默认 7 天）保鲜期。
   - **降级**：embedding / Milvus / MySQL 任一异常均静默降级为不缓存（直接走 LLM）；指纹获取失败退化为 `unknown`（缓存可用，仅暂失知识库变更感知）。
   - **成本**：未命中只多一次 embedding 调用（lookup 算好的向量传入 store 复用，不重复计费），命中省一整次 LLM 生成。
 
@@ -706,11 +706,11 @@ START ─┬─→ get_sales_30d ──→ time_series_predict ─┐
 | 层 | 内容 | 位置 |
 |----|------|------|
 | Java 集成测试 | Controller 集成测试（认证含 BCrypt/双 Token/黑名单/ADMIN 403、座位/分类/菜品/代理/订单/评价/库存/知识库/预测/Phase6 接口），合计 71 项 | `smart-kitchen/src/test/.../controller/` |
-| Java 单元测试 | `CategoryServiceTest`、`OrderTimeoutConsumerTest`（正常超时取消、已支付跳过、已撤销跳过、订单不存在、异常 Nack 进 DLQ） | `.../service/` |
-| Java 并发测试 | `OrderServiceConcurrencyTest`（CountDownLatch 多线程并发支付/出餐/支付vs撤销竞争，断言条件更新恰好一笔生效）、`OrderServiceSubmitRollbackTest`（MySQL 扣减返回 0 → 订单不落库 + Redis 回滚脚本执行） | `.../service/` |
+| Java 单元测试 | `CategoryServiceTest`、`KnowledgeDocumentServiceTest`（落库后 DEL 指纹）、`OrderTimeoutConsumerTest`（正常超时取消、已支付跳过、已撤销跳过、订单不存在、异常 Nack 进 DLQ） | `.../service/` |
+| Java 并发测试 | `OrderServiceConcurrencyTest`（CountDownLatch 多线程并发支付/出餐/支付vs撤销竞争，断言条件更新恰好一笔生效）、`OrderServiceSubmitRollbackTest`（MySQL 扣减返回 0 → 订单不落库 + Redis 回滚；ARGV 含初值、无 hasKey 预热） | `.../service/` |
 | WebSocket 鉴权测试 | `WebSocketAuthInterceptorTest`（合法/缺失/非法 token、越权连看板、会话按 token userId 绑定） | `.../config/` |
 | 测试环境 | H2 内存库 + `application-test.yml`（`schema-h2.sql` / `data-h2.sql`）；测试时 MQ listener 关闭自动启动 | `src/test/resources/` |
-| Python 测试 | MCP 工具（天气/节假日）、预测链路、RAG 接口；库存 Lua 脚本 50 线程并发压测 | `smart-kitchen-ai/tests/`、`test_rag.py`、`tests/test_stock_concurrency.py` |
+| Python 测试 | MCP 工具（天气/节假日）、预测链路、RAG 接口、语义缓存（含指纹 invalidate 后重算）；库存 Lua 脚本并发压测（含 key 缺失初始化与返还 SET） | `smart-kitchen-ai/tests/`、`test_rag.py`、`tests/test_stock_concurrency.py` |
 | 接口压测 | `/api/order/submit` 多线程并发下单（真实应用 + MySQL/Redis/RabbitMQ），断言不超卖并输出延迟分位 | `tests/load_order_submit.py` |
 | 小程序校验 | 静态结构校验（页面三件套、tabBar、工具方法、登录流程关键函数） | `tests/test_miniprogram.py` |
 

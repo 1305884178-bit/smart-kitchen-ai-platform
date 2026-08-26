@@ -74,6 +74,19 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     private static final String STOCK_PREFIX = "dish:stock:";
 
+    /**
+     * deduct_stock.lua / return_stock.lua 的 ARGV 约定（n = KEYS 数量）：
+     * ARGV[1..n] = 数量（扣减或返还）；ARGV[n+1..2n] = 对应初值
+     * （扣减时为 dish.dailyStock，供 key 不存在时在 Lua 内初始化；
+     * 返还时为 MySQL 加完后的 daily_stock，供 key 不存在时写入而非从 0 INCRBY）。
+     */
+    private Object[] stockLuaArgs(List<String> quantities, List<String> extraStocks) {
+        List<String> args = new ArrayList<>(quantities.size() + extraStocks.size());
+        args.addAll(quantities);
+        args.addAll(extraStocks);
+        return args.toArray(new String[0]);
+    }
+
     private DefaultRedisScript<Long> deductStockScript;
     private DefaultRedisScript<Long> returnStockScript;
 
@@ -93,7 +106,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     public String submitOrder(OrderSubmitDTO submitDTO) {
         Long userId = UserContext.getUserId();
         List<String> keys = new ArrayList<>();
-        List<String> args = new ArrayList<>();
+        List<String> quantities = new ArrayList<>();
+        List<String> initStocks = new ArrayList<>();
 
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<OrderDetail> detailList = new ArrayList<>();
@@ -113,13 +127,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             detail.setCreateTime(LocalDateTime.now());
 
             if (dish.getStatus() != null && dish.getStatus() == 1) {
-                // 在售菜品：正常计算
-                String key = STOCK_PREFIX + dishId;
-                if (Boolean.FALSE.equals(stringRedisTemplate.hasKey(key))) {
-                    stringRedisTemplate.opsForValue().set(key, String.valueOf(dish.getDailyStock()));
-                }
-                keys.add(key);
-                args.add(String.valueOf(detailDTO.getQuantity()));
+                // 在售菜品：正常计算；key 初始化交给 Lua，避免 hasKey+set 竞态超卖
+                keys.add(STOCK_PREFIX + dishId);
+                quantities.add(String.valueOf(detailDTO.getQuantity()));
+                initStocks.add(String.valueOf(dish.getDailyStock()));
 
                 detail.setDishName(dish.getName());
                 detail.setPrice(dish.getPrice());
@@ -135,7 +146,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         // Lua脚本扣减库存（仅对在售菜品）
         if (!keys.isEmpty()) {
-            Long result = stringRedisTemplate.execute(deductStockScript, keys, args.toArray(new String[0]));
+            Long result = stringRedisTemplate.execute(deductStockScript, keys, stockLuaArgs(quantities, initStocks));
             if (result != null && result < 0) {
                 int index = (int) (-result - 1);
                 throw new RuntimeException("库存不足: " + submitDTO.getDetails().get(index).getDishId());
@@ -189,7 +200,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             return orderNo;
         } catch (Exception e) {
             if (!keys.isEmpty()) {
-                stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
+                // 回滚时 key 通常已存在，走 INCRBY；若已被 DEL，则写回下单时读到的 DB 库存
+                stringRedisTemplate.execute(returnStockScript, keys, stockLuaArgs(quantities, initStocks));
             }
             throw e;
         }
@@ -292,19 +304,23 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (details.isEmpty()) return;
 
         List<String> keys = new ArrayList<>();
-        List<String> args = new ArrayList<>();
+        List<String> quantities = new ArrayList<>();
+        List<String> afterStocks = new ArrayList<>();
         for (OrderDetail detail : details) {
-            keys.add(STOCK_PREFIX + detail.getDishId());
-            args.add(String.valueOf(detail.getQuantity()));
-
-            Dish dish = dishMapper.selectById(detail.getDishId());
-            if (dish != null) {
-                dish.setDailyStock(dish.getDailyStock() + detail.getQuantity());
-                dishMapper.updateById(dish);
+            // 先改 MySQL 再改 Redis；SQL 原子加库存，避免并发返还互相覆盖
+            int affected = dishMapper.addStock(detail.getDishId(), detail.getQuantity());
+            if (affected == 0) {
+                continue;
             }
+            Dish updated = dishMapper.selectById(detail.getDishId());
+            keys.add(STOCK_PREFIX + detail.getDishId());
+            quantities.add(String.valueOf(detail.getQuantity()));
+            afterStocks.add(String.valueOf(updated.getDailyStock()));
         }
 
-        stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
+        if (!keys.isEmpty()) {
+            stringRedisTemplate.execute(returnStockScript, keys, stockLuaArgs(quantities, afterStocks));
+        }
     }
 
     @Override
@@ -371,7 +387,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         }
 
         List<String> keys = new ArrayList<>();
-        List<String> args = new ArrayList<>();
+        List<String> quantities = new ArrayList<>();
+        List<String> initStocks = new ArrayList<>();
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<OrderDetail> newDetails = new ArrayList<>();
         List<OrderDetail> activeDetails = new ArrayList<>(); // 在售菜品，需扣库存
@@ -391,13 +408,10 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             detail.setCreateTime(LocalDateTime.now());
 
             if (dish.getStatus() != null && dish.getStatus() == 1) {
-                // 在售菜品：正常计算
-                String key = STOCK_PREFIX + dishId;
-                if (Boolean.FALSE.equals(stringRedisTemplate.hasKey(key))) {
-                    stringRedisTemplate.opsForValue().set(key, String.valueOf(dish.getDailyStock()));
-                }
-                keys.add(key);
-                args.add(String.valueOf(detailDTO.getQuantity()));
+                // 在售菜品：正常计算；key 初始化交给 Lua，避免 hasKey+set 竞态超卖
+                keys.add(STOCK_PREFIX + dishId);
+                quantities.add(String.valueOf(detailDTO.getQuantity()));
+                initStocks.add(String.valueOf(dish.getDailyStock()));
 
                 detail.setDishName(dish.getName());
                 detail.setPrice(dish.getPrice());
@@ -413,7 +427,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
         // Lua脚本扣减库存（仅对在售菜品）
         if (!keys.isEmpty()) {
-            Long result = stringRedisTemplate.execute(deductStockScript, keys, args.toArray(new String[0]));
+            Long result = stringRedisTemplate.execute(deductStockScript, keys, stockLuaArgs(quantities, initStocks));
             if (result != null && result < 0) {
                 throw new RuntimeException("库存不足，加菜失败");
             }
@@ -451,7 +465,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             sendNewOrderToKitchenBoard(newOrder, activeDetails);
         } catch (Exception e) {
             if (!keys.isEmpty()) {
-                stringRedisTemplate.execute(returnStockScript, keys, args.toArray(new String[0]));
+                stringRedisTemplate.execute(returnStockScript, keys, stockLuaArgs(quantities, initStocks));
             }
             throw e;
         }

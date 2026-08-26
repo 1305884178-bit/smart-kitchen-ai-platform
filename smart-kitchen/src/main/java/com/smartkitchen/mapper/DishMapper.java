@@ -18,4 +18,12 @@ public interface DishMapper extends BaseMapper<Dish> {
      * @return 影响行数
      */
     int deductStock(@Param("id") Long id, @Param("quantity") Integer quantity);
+
+    /**
+     * 原子增加库存（取消订单返还）
+     * @param id 菜品ID
+     * @param quantity 增加数量
+     * @return 影响行数
+     */
+    int addStock(@Param("id") Long id, @Param("quantity") Integer quantity);
 }

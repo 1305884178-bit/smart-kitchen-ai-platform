@@ -23,12 +23,12 @@
 - Dish 模块：按分类查询上架菜品列表，返回库存与配料信息。
 - Order 模块（下单核心）：
   - 实现 `/api/order/submit`；
-  - 引入 Redis，编写 Lua 脚本（`deduct_stock.lua` 先检后扣 / `return_stock.lua` 回滚）实现高并发下的库存原子扣减；
+  - 引入 Redis，编写 Lua 脚本（`deduct_stock.lua`：key 缺失时用传入初值原子初始化再扣 / `return_stock.lua`：key 缺失时写回返还后的 DB 库存）实现高并发下的库存原子扣减；
   - 订单落库并初始化状态为 `ORDERED`，MySQL 库存条件更新作为第二道防线；
   - 已下架菜品处理：不计价、不扣库存、明细名称标记「（已下架）」。
 - Order 模块（订单流转）：
   - 「确认结账」`/api/order/{id}/pay`：登记模拟流水号（`SIM_`+时间戳）与支付时间，采用「先登记、出餐后自动流转 PAID」模式；
-  - 「撤销订单」：ORDERED 状态撤销返还库存（Redis + MySQL 同步），SERVED 不返还。
+  - 「撤销订单」：ORDERED 状态撤销返还库存（先 MySQL 原子加回，再 Redis 同步；SERVED 不返还）。
 
 ## Phase 3：B 端后厨协作链路（已完成）
 
@@ -57,7 +57,7 @@
 
 - **Step 1 基础设施**：搭建 FastAPI 工程（LangGraph / PyMySQL / redis-py / httpx）；搭建 Milvus Lite 本地向量库（`data/milvus.db`，集合 `kitchen_knowledge`，1024 维）；MySQL 建 `ai_prediction_record`、`ai_knowledge_document` 表。
 - **Step 2 RAG 知识库**：`RecursiveCharacterTextSplitter(chunk_size=500, overlap=50)` 分块 → 百炼 Embedding → Milvus；版本管理机制（version/status/effective_from，检索按版本过滤）；暴露 `/ai/knowledge/process`、`/ai/knowledge/search`。
-- **Step 3 AI 客服（ReAct Agent + Function Calling）**：挂载 3 个工具——`search_dish_by_preference`（Milvus 语义推荐）、`check_dish_inventory` 与 `get_dish_ingredients`（回调 Java 代理接口查 MySQL）；`/ai/chat` SSE 流式输出（`data: {content}` + `[DONE]`）；语义缓存替代原 MD5 精确缓存——问题转 embedding 后在 Milvus 集合 `ai_chat_semantic_cache` 检索，余弦相似度 ≥0.92 命中历史回答（近义问法可命中），缓存条目带知识库版本指纹（`ai_knowledge_document` 表哈希，知识库变更自动失效）与 7 天保鲜期；仅缓存非动态回答（监听 `on_tool_start`，调用库存/配料等实时工具的回答不写入），embedding/Milvus 异常静默降级为直调 LLM。
+- **Step 3 AI 客服（ReAct Agent + Function Calling）**：挂载 3 个工具——`search_dish_by_preference`（Milvus 语义推荐）、`check_dish_inventory` 与 `get_dish_ingredients`（回调 Java 代理接口查 MySQL）；`/ai/chat` SSE 流式输出（`data: {content}` + `[DONE]`）；语义缓存替代原 MD5 精确缓存——问题转 embedding 后在 Milvus 集合 `ai_chat_semantic_cache` 检索，余弦相似度 ≥0.92 命中历史回答（近义问法可命中），缓存条目带知识库版本指纹（`ai_knowledge_document` 表哈希；Java 落库成功后主动 DEL Redis 指纹，60s TTL 作兜底）与 7 天保鲜期；仅缓存非动态回答（监听 `on_tool_start`，调用库存/配料等实时工具的回答不写入），embedding/Milvus 异常静默降级为直调 LLM。
 - **Step 4 AI 备菜预测（LangGraph 多节点工作流）**：
   - 单工作流 `predict_subgraph`，由触发接口/定时任务直接调用，无 Supervisor 路由层；
   - 图结构：4 个数据采集节点并行（`get_sales_30d`、`get_tomorrow_weather`、`get_holiday_info`、`get_recent_reviews`）→ `time_series_predict` → `llm_adjust` → `save_result`；
@@ -140,7 +140,8 @@
 - [x] 核心业务测试：Java 侧 17 个测试类（12 个 Controller 集成测试基于 H2 内存库 + 分类服务与超时消费者单元测试 + 订单并发/回滚/WS 鉴权测试）；Python 侧 MCP 工具/预测/RAG 测试脚本；小程序静态结构校验脚本。
 - [x] 并发与安全加固：
   - 订单状态迁移乐观锁下沉——`payOrder`/`cancelOrder`/`serveOrder` 改为 SQL 条件更新（`WHERE id=? AND status IN (...) [AND pay_time IS NULL]`），影响行数 0 即并发冲突报错，堵住先查后改窗口（`OrderServiceConcurrencyTest`：20 线程并发支付/出餐/支付 vs 撤销竞争，断言恰好一笔生效）；
-  - 下单中途失败补偿测试（`OrderServiceSubmitRollbackTest`：mock `deductStock` 返回 0，断言订单不落库且 Redis 回滚脚本执行）；
+  - 下单中途失败补偿测试（`OrderServiceSubmitRollbackTest`：mock `deductStock` 返回 0，断言订单不落库且 Redis 回滚脚本执行；ARGV 含初值、无 hasKey 预热）；
+  - 库存缓存加固：Lua 内原子初始化缺失 key；返还时 key 缺失写回 DB 真值；MySQL 返还改原子 `daily_stock = daily_stock + qty`；知识库落库后 DEL `kb_version_fingerprint`；
   - 接口级压测（`tests/load_order_submit.py`：50 线程并发抢库存 20，实测 20 成功 30 拒绝、Redis/MySQL 双侧库存恰好为 0）；
   - WebSocket 握手 JWT 鉴权（`WebSocketAuthInterceptor`：`/ws/kitchen-board` 需 ADMIN，`/ws/customer` 的 userId 改为 token 解析，`WebSocketAuthInterceptorTest` 6 项断言）；
   - **认证加固**：BCrypt 密码哈希；HTTP 拦截器对管理端接口强制 ADMIN（403）；Access（2h）+ Refresh（7d）双 Token、Redis 黑名单与刷新旋转、全端吊销；管理端/小程序 401 时静默 refresh；`AuthControllerIntegrationTest` 6 项 + `PasswordEncoderTest` 全过（Java 合计 71 项）。

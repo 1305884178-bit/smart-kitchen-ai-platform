@@ -10,4 +10,12 @@
         WHERE id = #{id} AND daily_stock >= #{quantity}
     </update>
 
+    <!-- 原子加库存：避免并发返还互相覆盖 -->
+    <update id="addStock">
+        UPDATE pms_dish
+        SET daily_stock = daily_stock + #{quantity},
+            update_time = NOW()
+        WHERE id = #{id}
+    </update>
+
 </mapper>

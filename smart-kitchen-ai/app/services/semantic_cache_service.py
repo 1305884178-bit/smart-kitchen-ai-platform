@@ -52,7 +52,8 @@ class SemanticCacheService:
         """
         知识库版本指纹：对 ai_knowledge_document 全表 (id, version, status) 取哈希，
         文档新增/版本/状态变化都会改变指纹，使旧缓存条目因 filter 不匹配而自然失效。
-        指纹在 Redis 缓存 60s；MySQL 不可用时降级为固定值 "unknown"（缓存仍可用，
+        指纹在 Redis 缓存 60s；知识库元数据写入成功后 Java 侧会主动 DEL 该 key，
+        TTL 仅作兜底。MySQL 不可用时降级为固定值 "unknown"（缓存仍可用，
         仅暂时失去知识库变更感知能力）。
         """
         try:
@@ -83,6 +84,13 @@ class SemanticCacheService:
         except Exception as e:
             logger.warning(f"[SemanticCache] 写入指纹缓存失败: {e}")
         return fingerprint
+
+    def invalidate_kb_version_cache(self) -> None:
+        """主动删除指纹缓存，使下次 get_kb_version 重新查库计算。保留 TTL 兜底。"""
+        try:
+            redis_client.delete(KB_VERSION_CACHE_KEY)
+        except Exception as e:
+            logger.warning(f"[SemanticCache] 删除指纹缓存失败: {e}")
 
     def lookup(self, message: str) -> tuple[str | None, list[float] | None]:
         """

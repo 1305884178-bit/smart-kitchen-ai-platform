@@ -19,6 +19,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Collections;
+import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -59,11 +60,11 @@ public class OrderControllerIntegrationTest {
         customerToken = jwtUtil.generateToken(1001L, "CUSTOMER", "test_openid_1001");
         adminToken = jwtUtil.generateToken(1000L, "ADMIN", "admin_openid");
 
-        // Mock Redis
+        // Mock Redis：Lua 扣减成功（库存初始化已下沉到脚本，不再 hasKey + set）
         ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
         when(stringRedisTemplate.opsForValue()).thenReturn(valueOperations);
-        when(stringRedisTemplate.hasKey(anyString())).thenReturn(true);
-        when(stringRedisTemplate.execute(any(RedisScript.class), any(), any())).thenReturn(1L);
+        when(stringRedisTemplate.execute(any(RedisScript.class), any(List.class), anyString(), anyString()))
+                .thenReturn(1L);
     }
 
     // ==================== /api/order/my-list ====================

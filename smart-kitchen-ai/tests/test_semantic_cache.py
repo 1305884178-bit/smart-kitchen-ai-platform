@@ -174,6 +174,33 @@ class TestKbVersion:
 
             assert svc.get_kb_version() == "unknown"  # 降级但缓存仍可用
 
+    def test_invalidate_forces_recompute_instead_of_stale_cache(self):
+        """知识库更新后主动 DEL 指纹：下次 get_kb_version 应重新查库，而非死读旧缓存。"""
+        svc = scs.SemanticCacheService()
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [{"id": 1, "version": "2.0", "status": "active"}]
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+        conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+        with patch.object(scs, "redis_client") as mock_redis, \
+             patch.object(scs, "get_db_connection", return_value=conn):
+            mock_redis.get.return_value = "stale_old_fp"
+
+            assert svc.get_kb_version() == "stale_old_fp"
+            mock_redis.get.reset_mock()
+
+            svc.invalidate_kb_version_cache()
+            mock_redis.delete.assert_called_once_with(scs.KB_VERSION_CACHE_KEY)
+
+            mock_redis.get.return_value = None  # DEL 后 miss
+            new_fp = svc.get_kb_version()
+
+            assert new_fp != "stale_old_fp"
+            mock_redis.setex.assert_called_once()
+            assert mock_redis.setex.call_args[0][0] == scs.KB_VERSION_CACHE_KEY
+            assert mock_redis.setex.call_args[0][1] == settings.kb_version_cache_ttl
+
 
 # ---------- ChatService 集成（mock Agent 与缓存层） ----------
 

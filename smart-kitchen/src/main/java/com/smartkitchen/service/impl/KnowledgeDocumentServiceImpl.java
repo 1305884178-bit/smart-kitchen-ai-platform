@@ -10,6 +10,10 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -21,6 +25,14 @@ import java.util.List;
  */
 @Service
 public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentMapper, KnowledgeDocument> implements KnowledgeDocumentService {
+
+    private static final Logger log = LoggerFactory.getLogger(KnowledgeDocumentServiceImpl.class);
+
+    /** 与 Python semantic_cache_service.KB_VERSION_CACHE_KEY 保持一致 */
+    private static final String KB_VERSION_CACHE_KEY = "kb_version_fingerprint";
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     /**
      * 查询所有知识库文档列表，按创建时间降序排列
@@ -104,5 +116,15 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
         document.setStatus(dto.getStatus() != null ? dto.getStatus() : "draft");
         document.setEffectiveFrom(dto.getEffectiveFrom());
         this.save(document);
+        // MySQL 元数据已变，主动删指纹缓存；保留 60s TTL 作兜底，避免最长等一分钟才感知变更
+        invalidateKbVersionFingerprint();
+    }
+
+    private void invalidateKbVersionFingerprint() {
+        try {
+            stringRedisTemplate.delete(KB_VERSION_CACHE_KEY);
+        } catch (Exception e) {
+            log.warn("删除知识库版本指纹缓存失败（不影响上传）: {}", e.getMessage());
+        }
     }
 }

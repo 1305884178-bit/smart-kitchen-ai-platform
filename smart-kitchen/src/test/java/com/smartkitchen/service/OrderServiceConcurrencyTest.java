@@ -158,7 +158,7 @@ public class OrderServiceConcurrencyTest {
     @Test
     public void testPayVsCancel_exactlyOneWins() throws Exception {
         // cancelOrder 的库存回滚会走 Redis 回滚脚本，Mock 掉避免依赖真实 Redis
-        when(stringRedisTemplate.execute(any(RedisScript.class), any(), any())).thenReturn(1L);
+        when(stringRedisTemplate.execute(any(RedisScript.class), any(java.util.List.class), any(), any())).thenReturn(1L);
 
         Order order = newOrder(OrderStatusEnum.SERVED.getCode());
         Long orderId = order.getId();
