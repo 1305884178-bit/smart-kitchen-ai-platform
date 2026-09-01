@@ -40,6 +40,21 @@ CREATE TABLE IF NOT EXISTS `oms_order` (
   UNIQUE KEY `uk_payment_trade_no` (`payment_trade_no`)
 )  COMMENT='订单主表';
 
+-- 订单主表索引（H2 不支持在建表语句内用 KEY 定义非唯一索引，单独建）
+CREATE INDEX IF NOT EXISTS `idx_timeout_scan` ON `oms_order` (`status`, `pay_time`, `create_time`);
+
+-- 1.1 延迟消息发送失败记录表（confirm nack 三次或 convertAndSend 抛错时写入，配合扫表兜底）
+CREATE TABLE IF NOT EXISTS `oms_mq_send_fail` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增',
+  `order_id` bigint NOT NULL COMMENT '关联订单',
+  `reason` varchar(512) DEFAULT NULL COMMENT '失败原因',
+  `retry_count` int NOT NULL DEFAULT '0' COMMENT '已重试次数',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录时间',
+  PRIMARY KEY (`id`)
+)  COMMENT='订单延迟消息发送失败记录';
+
+CREATE INDEX IF NOT EXISTS `idx_mq_send_fail_order_id` ON `oms_mq_send_fail` (`order_id`);
+
 -- 2. 订单明细表
 CREATE TABLE IF NOT EXISTS `oms_order_detail` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增',

@@ -40,6 +40,15 @@
   border-radius: 8rpx;
 }
 
+.pay-countdown {
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  color: #e6432d;
+  background: #fef0ef;
+  padding: 12rpx 16rpx;
+  border-radius: 8rpx;
+}
+
 .section-title {
   font-size: 30rpx;
   font-weight: 500;

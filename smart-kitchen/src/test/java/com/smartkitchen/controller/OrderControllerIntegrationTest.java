@@ -52,6 +52,9 @@ public class OrderControllerIntegrationTest {
     @MockBean
     private StringRedisTemplate stringRedisTemplate;
 
+    @MockBean
+    private org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
+
     private String customerToken;
     private String adminToken;
 

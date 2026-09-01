@@ -16,7 +16,7 @@ public class KitchenBoardController {
     private OrderService orderService;
 
     /**
-     * 获取当前 ORDERED 状态的订单 HTTP 快照（主要用于 WebSocket 断线重连时的数据补齐）
+     * 获取当前已支付待出餐（ORDERED 且 pay_time 非空）的订单 HTTP 快照（主要用于 WebSocket 断线重连时的数据补齐）
      * @return 返回待制作订单列表
      */
     @GetMapping("/orders")

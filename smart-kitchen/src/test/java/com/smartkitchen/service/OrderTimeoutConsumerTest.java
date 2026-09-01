@@ -10,23 +10,25 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
-import static org.junit.jupiter.api.Assertions.*;
+import java.time.LocalDateTime;
+
 import static org.mockito.Mockito.*;
 
 /**
- * Phase 6 Step 5 RabbitMQ 订单超时消费者单元测试（纯Mock，不加载Spring上下文）
- * 覆盖：ORDERED超时取消 / SERVED超时取消 / PAID跳过 / CANCELLED跳过 / 订单不存在跳过
+ * 订单支付超时消费者单元测试（纯Mock，不加载Spring上下文）
+ *
+ * 先付后做口径：
+ * - 未支付 ORDERED → 取消（cancelOrderForTimeout）并 ACK
+ * - 已支付（pay_time 非空）/ PAID / SERVED / CANCELLED / 不存在 → ACK 跳过，不取消
+ * - 超时永不取消 SERVED
+ * - 消费异常 → basicNack(requeue=false) 进 DLQ
  */
 @ExtendWith(MockitoExtension.class)
 public class OrderTimeoutConsumerTest {
 
     @Mock
     private OrderService orderService;
-
-    @Mock
-    private RabbitTemplate rabbitTemplate;
 
     @InjectMocks
     private OrderTimeoutConsumer orderTimeoutConsumer;
@@ -39,10 +41,10 @@ public class OrderTimeoutConsumerTest {
     }
 
     /**
-     * 测试：ORDERED状态订单超时 → 应调用cancelOrder，然后ACK
+     * 测试：ORDERED 且未支付 → 调用 cancelOrderForTimeout，然后 ACK
      */
     @Test
-    public void testHandleOrderTimeout_orderedOrder_shouldCancel() throws Exception {
+    public void testHandleOrderTimeout_orderedUnpaid_shouldCancel() throws Exception {
         Order order = new Order();
         order.setId(1L);
         order.setStatus(OrderStatusEnum.ORDERED.getCode());
@@ -51,15 +53,33 @@ public class OrderTimeoutConsumerTest {
 
         orderTimeoutConsumer.handleOrderTimeout("1", mockChannel, 10L);
 
-        verify(orderService).cancelOrder(1L);
+        verify(orderService).cancelOrderForTimeout(1L);
         verify(mockChannel).basicAck(10L, false);
     }
 
     /**
-     * 测试：SERVED状态订单超时 → 应调用cancelOrder
+     * 测试：ORDERED 但已支付（pay_time 非空）→ 跳过取消，ACK
      */
     @Test
-    public void testHandleOrderTimeout_servedOrder_shouldCancel() throws Exception {
+    public void testHandleOrderTimeout_orderedButPaid_shouldSkip() throws Exception {
+        Order order = new Order();
+        order.setId(1L);
+        order.setStatus(OrderStatusEnum.ORDERED.getCode());
+        order.setPayTime(LocalDateTime.now());
+
+        when(orderService.getById(1L)).thenReturn(order);
+
+        orderTimeoutConsumer.handleOrderTimeout("1", mockChannel, 15L);
+
+        verify(orderService, never()).cancelOrderForTimeout(anyLong());
+        verify(mockChannel).basicAck(15L, false);
+    }
+
+    /**
+     * 测试：SERVED 状态 → 超时永不取消，ACK 跳过
+     */
+    @Test
+    public void testHandleOrderTimeout_servedOrder_shouldSkip() throws Exception {
         Order order = new Order();
         order.setId(2L);
         order.setStatus(OrderStatusEnum.SERVED.getCode());
@@ -68,12 +88,12 @@ public class OrderTimeoutConsumerTest {
 
         orderTimeoutConsumer.handleOrderTimeout("2", mockChannel, 20L);
 
-        verify(orderService).cancelOrder(2L);
+        verify(orderService, never()).cancelOrderForTimeout(anyLong());
         verify(mockChannel).basicAck(20L, false);
     }
 
     /**
-     * 测试：PAID状态订单超时 → 跳过，不调用cancelOrder
+     * 测试：PAID 状态 → 跳过，不取消
      */
     @Test
     public void testHandleOrderTimeout_paidOrder_shouldSkip() throws Exception {
@@ -85,12 +105,12 @@ public class OrderTimeoutConsumerTest {
 
         orderTimeoutConsumer.handleOrderTimeout("1", mockChannel, 30L);
 
-        verify(orderService, never()).cancelOrder(anyLong());
+        verify(orderService, never()).cancelOrderForTimeout(anyLong());
         verify(mockChannel).basicAck(30L, false);
     }
 
     /**
-     * 测试：CANCELLED状态订单超时 → 跳过
+     * 测试：CANCELLED 状态 → 跳过
      */
     @Test
     public void testHandleOrderTimeout_cancelledOrder_shouldSkip() throws Exception {
@@ -102,7 +122,7 @@ public class OrderTimeoutConsumerTest {
 
         orderTimeoutConsumer.handleOrderTimeout("2", mockChannel, 40L);
 
-        verify(orderService, never()).cancelOrder(anyLong());
+        verify(orderService, never()).cancelOrderForTimeout(anyLong());
         verify(mockChannel).basicAck(40L, false);
     }
 
@@ -115,7 +135,7 @@ public class OrderTimeoutConsumerTest {
 
         orderTimeoutConsumer.handleOrderTimeout("99999", mockChannel, 50L);
 
-        verify(orderService, never()).cancelOrder(anyLong());
+        verify(orderService, never()).cancelOrderForTimeout(anyLong());
         verify(mockChannel).basicAck(50L, false);
     }
 
@@ -129,14 +149,5 @@ public class OrderTimeoutConsumerTest {
         orderTimeoutConsumer.handleOrderTimeout("1", mockChannel, 60L);
 
         verify(mockChannel).basicNack(60L, false, false);
-    }
-
-    /**
-     * 测试：RabbitTemplate发送格式验证
-     */
-    @Test
-    public void testSubmitOrder_sendsDelayMessage() {
-        rabbitTemplate.convertAndSend("order.delay.exchange", "order.delay", "100");
-        verify(rabbitTemplate).convertAndSend("order.delay.exchange", "order.delay", "100");
     }
 }

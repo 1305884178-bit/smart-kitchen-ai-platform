@@ -32,7 +32,16 @@ public interface OrderService extends IService<Order> {
     void cancelOrder(Long orderId);
 
     /**
-     * 获取所有状态为待出餐（ORDERED）的订单及其明细
+     * 支付超时自动取消（MQ 延迟消息 / 扫表兜底共用）。
+     * 仅当订单 ORDERED 且未支付时取消并返还库存，取消原因 PAY_TIMEOUT；
+     * 父单超时可级联未支付子单；子单超时只取消自己；
+     * 与支付并发时 SQL 条件更新影响 0 行，视为支付胜出，静默跳过不抛异常。
+     * @param orderId 订单ID
+     */
+    void cancelOrderForTimeout(Long orderId);
+
+    /**
+     * 获取所有已支付待出餐（ORDERED 且 pay_time 非空）的订单及其明细，厨房看板只展示已支付单
      * @return 订单视图对象列表
      */
     List<OrderVO> getOrderedOrders();

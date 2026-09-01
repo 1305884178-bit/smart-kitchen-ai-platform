@@ -7,7 +7,8 @@ import lombok.Getter;
  */
 @Getter
 public enum CancelReasonEnum {
-    MERCHANT_CANCEL("MERCHANT_CANCEL", "商家撤销");
+    MERCHANT_CANCEL("MERCHANT_CANCEL", "商家撤销"),
+    PAY_TIMEOUT("PAY_TIMEOUT", "支付超时自动取消");
 
     private final String code;
     private final String desc;

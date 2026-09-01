@@ -113,12 +113,14 @@ src/main/java/com/smartkitchen/
 │                    # WebSocketAuthInterceptor（握手 JWT 鉴权）、
 │                    # KitchenBoardWebSocketHandler、CustomerWebSocketHandler、RabbitMQConfig、
 │                    # MybatisPlusConfig、RestTemplateConfig、DotenvLoader
-├── consumer/        # OrderTimeoutConsumer（MQ 超时消费）
+├── consumer/        # OrderTimeoutConsumer（MQ 支付超时消费，手动 ACK）
 ├── controller/      # 15 个 REST 控制器（含 ai/AdminPredictController）
 ├── dto/             # 请求 DTO / 响应 VO（20 个）
-├── entity/          # 9 个数据库实体
+├── entity/          # 10 个数据库实体
 ├── exception/       # GlobalExceptionHandler
-├── mapper/          # 9 个 MyBatis Mapper
+├── mapper/          # 10 个 MyBatis Mapper
+├── mq/              # OrderTimeoutMessageSender（afterCommit 发送 + confirm 异步重试 + 失败落表）
+├── task/            # OrderTimeoutScanTask（未支付超时扫表兜底，默认 2 分钟）
 └── service/         # 12 个业务接口
     └── impl/        # 12 个业务实现
 src/main/resources/
@@ -257,6 +259,8 @@ src/
 | parent_order_id | bigint | 父订单 ID（加菜子订单指向原订单，主订单为 NULL） |
 | create_time / update_time | datetime | - |
 
+索引：`uk_order_no`、`uk_payment_trade_no`、`idx_timeout_scan(status, pay_time, create_time)`（未支付超时扫表兜底用）。
+
 ### 5.5 oms_order_detail（订单明细表）
 
 | 字段 | 类型 | 说明 |
@@ -324,6 +328,18 @@ src/
 | effective_from | datetime | 生效时间 |
 | create_time | datetime | - |
 
+### 5.10 oms_mq_send_fail（订单延迟消息发送失败记录表）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | bigint PK AI | - |
+| order_id | bigint KEY | 关联订单 |
+| reason | varchar(512) | 失败原因（convertAndSend 异常 / confirm nack cause） |
+| retry_count | int | 已重试次数（confirm nack 最多异步重试 3 次） |
+| create_time | datetime | 记录时间 |
+
+> 仅作告警与人工核查：未支付单取消的正确性由「扫表兜底」（8.5）保证，不依赖本表重发。
+
 ---
 
 ## 6. 订单状态机与父子订单规则
@@ -332,20 +348,24 @@ src/
 
 ```
 ORDERED(0)
-  ├── 厨房[完成出餐] → SERVED(10)        （若已登记支付 → 直接 PAID(20)）
-  │     ├── 顾客[结账] → PAID(20)
-  │     ├── 顾客[加菜] → 新建 ORDERED 子订单（父单状态不变）
-  │     └── 管理员[撤销] / MQ超时 → CANCELLED(90)
-  ├── 顾客[结账] → 登记 pay_time + 流水号，状态保持 ORDERED
-  ├── 管理员[撤销] / MQ超时 → CANCELLED(90)
+  ├── 顾客[支付] → 登记 pay_time + 流水号，状态保持 ORDERED，推厨房看板 NEW_ORDER（先付后做）
+  │     ├── 厨房[完成出餐] → 已有 pay_time → 直接 PAID(20)（正常路径不再经过 SERVED 待结账）
+  │     ├── 顾客[加菜] → 新建 ORDERED 子订单（同样 15 分钟支付窗口，付完才推看板）
+  │     └── 管理员[撤销] → CANCELLED(90)
+  ├── 支付超时（15 分钟，MQ 延迟消息 / 扫表兜底）→ CANCELLED(90)，原因 PAY_TIMEOUT，返还库存
+  │     （仅「ORDERED 且 pay_time 为空」参与超时取消；SERVED 永不超时取消；
+  │       父单超时可级联未支付子单，子单超时只取消自己）
+  ├── 管理员[撤销] → CANCELLED(90)
   └── PAID / CANCELLED 为终态
 ```
 
 **规则**：
 
+- **先付后做**：下单/加菜只扣库存不落看板；支付成功（`pay_time` 写入）才推厨房看板 `NEW_ORDER`；厨房看板（HTTP 快照与 WS）只展示「ORDERED 且 `pay_time` 非空」的已支付待出餐单。库存仍在下单时预扣（15 分钟窗口内锁库存，防止支付后无库存）。
 - 状态迁移采用「应用层预校验 + SQL 条件更新最终裁决」：Service 先校验当前状态给出友好报错，真正写入用条件 UPDATE（`WHERE id=? AND status IN (...)`，支付另加 `pay_time IS NULL`），影响行数 0 即被并发抢先，报错提示——与库存扣减 `daily_stock >= ?` 同一思想，由数据库原子操作堵住先查后改窗口。
 - 撤销：仅 `ORDERED` 返还库存（先 MySQL 原子加回，再 Redis `return_stock.lua`；key 缺失时写回返还后的 DB 库存）；`SERVED` 不返还；级联撤销全部子订单。
-- 结账幂等：`pay_time` 非空拒绝重复支付（含条件更新兜底）；`payment_trade_no` 唯一索引兜底。
+- 支付幂等：`pay_time` 非空且无未支付子单时拒绝重复支付（含条件更新兜底）；`payment_trade_no` 唯一索引兜底。
+- 支付 vs 超时取消并发：取消走 `WHERE id=? AND status=0 AND pay_time IS NULL` 条件更新，与支付只能成功一笔；取消影响 0 行视为支付胜出，消费端 ACK 跳过。
 
 ### 6.2 父子订单合并规则（C 端视图）
 
@@ -355,7 +375,7 @@ ORDERED(0)
 | 明细 | 父单 + 全部子订单的明细合并展示 |
 | 金额 | 父单金额 + 子订单金额合计 |
 | 状态 | 任一为 CANCELLED → CANCELLED；全部 PAID → PAID；全部 ≥ SERVED → SERVED；否则 ORDERED |
-| 支付 | 父单结账时自动合并支付所有未支付子订单，流水号追加 `_1`、`_2` |
+| 支付 | 支付父单时自动合并支付所有未支付子订单，流水号追加 `_1`、`_2`；父单已支付但有未支付子单时允许再支付（只补未支付子单并分别推看板） |
 
 ---
 
@@ -398,9 +418,9 @@ ORDERED(0)
 
 | 方法 | 路径 | 入参 | 响应 data | 说明 |
 |------|------|------|-----------|------|
-| POST | `/api/order/submit` | `{ seatNumber, remark, details: [{ dishId, quantity }] }` | `orderNo`（字符串） | 下单：Lua 扣库存 → 落库 → 推看板 → 发 MQ 延迟消息 |
-| POST | `/api/order/{id}/add-dish` | `{ details: [{ dishId, quantity }] }` | — | 加菜：创建子订单 + 独立扣库存 + 推看板新卡片 |
-| POST | `/api/order/{id}/pay` | — | — | 结账：登记模拟流水号，合并支付子订单 |
+| POST | `/api/order/submit` | `{ seatNumber, remark, details: [{ dishId, quantity }] }` | `orderNo`（字符串） | 下单：Lua 扣库存 → 落库 → 事务提交后发 MQ 延迟消息（15 分钟支付窗口）；不推看板 |
+| POST | `/api/order/{id}/add-dish` | `{ details: [{ dishId, quantity }] }` | — | 加菜：父单必须已支付；创建子订单 + 独立扣库存 + 事务提交后发子单延迟消息；不推看板 |
+| POST | `/api/order/{id}/pay` | — | — | 支付：登记 pay_time + 模拟流水号，合并支付未支付子订单；支付成功的 ORDERED 单推看板 NEW_ORDER；父单已付但有未支付子单时允许再支付（只补子单） |
 | GET | `/api/order/my-list` | Query: `page&size` | 分页订单（父子合并视图） | 我的历史订单 |
 | GET | `/api/order/my-detail/{id}` | Path: id | 详情（合并明细/金额/状态 + `availableActions`） | C 端订单详情 |
 | GET | `/api/order/admin-list` | Query: `page&size&status&seatNumber` | 分页订单 | B 端订单列表（按下单时间倒序，可筛选） |
@@ -408,13 +428,13 @@ ORDERED(0)
 | POST | `/api/order/{id}/cancel` | — | — | 撤销（ORDERED/SERVED → CANCELLED，级联子订单） |
 | POST | `/api/order/{id}/complete` | — | — | 完成出餐（与厨房看板 serve 同一 Service 实现） |
 
-> `availableActions` 取值：`ADD_DISH` / `PAY` / `REVIEW`。规则：ORDERED（已登记支付则不含 PAY）、SERVED → ADD_DISH + PAY；PAID 且未评价 → REVIEW；终态/已评价 → 空。
+> `availableActions` 取值：`ADD_DISH` / `PAY` / `REVIEW`。规则（先付后做）：ORDERED 未支付 → 仅 `PAY`；ORDERED 已支付 → `ADD_DISH`，有未支付子单仍含 `PAY`；SERVED → ADD_DISH + PAY（存量兼容）；PAID 且未评价 → `REVIEW`；终态/已评价 → 空。
 
 #### 厨房看板 KitchenBoardController `/api/kitchen-board`
 
 | 方法 | 路径 | 响应 data | 说明 |
 |------|------|-----------|------|
-| GET | `/api/kitchen-board/orders` | `[{ ...order, details: [...] }]` | 当前 ORDERED 订单快照（时间升序），用于 WS 断线重连补齐；已下架菜品明细（price=0）被过滤 |
+| GET | `/api/kitchen-board/orders` | `[{ ...order, details: [...] }]` | 已支付待出餐（ORDERED 且 pay_time 非空）订单快照（时间升序），用于 WS 断线重连补齐；已下架菜品明细（price=0）被过滤 |
 | POST | `/api/kitchen-board/order/{id}/serve` | — | 完成出餐（看板前端实际调用入口） |
 
 #### 分类管理 CategoryController `/api/admin/dish/category`
@@ -548,43 +568,59 @@ ORDERED(0)
   → MySQL 同步扣减：UPDATE pms_dish SET daily_stock = daily_stock - ? WHERE id = ? AND daily_stock >= ?
      （affectedRows = 0 视为失败）
   → 任一异常：执行 return_stock.lua 回滚 Redis，事务回滚 MySQL
-  → 成功：WS 推看板 NEW_ORDER + MQ 发延迟消息
+  → 成功：事务提交后（afterCommit）发 MQ 延迟消息（x-delay=15min）；不推看板，支付成功才推 NEW_ORDER
 ```
+
+> 库存扣减时机保持「下单即扣」不变：15 分钟支付窗口需要锁定库存，不能改成支付成功才扣（否则窗口内超卖）。MQ 发送不参与事务、失败不回滚库存，由扫表兜底关单（见 8.5）。
 
 **撤销返还**：先 MySQL `UPDATE ... SET daily_stock = daily_stock + ?`（原子加回），再执行 `return_stock.lua`（带返还量与加完后的 DB 库存）。
 ### 8.3 WebSocket 实时推送
 
 - 两个 Handler：`KitchenBoardWebSocketHandler`（单会话广播）、`CustomerWebSocketHandler`（按 userId 定向）。
-- 推送时机：`OrderServiceImpl` 内下单、加菜（→看板 `NEW_ORDER`），出餐（→顾客 `ORDER_SERVED`）。
+- 推送时机（先付后做）：`OrderServiceImpl.payOrder` 支付成功后对本次支付的 ORDERED 单（含补付的子单）在事务提交后推看板 `NEW_ORDER`；出餐（→顾客 `ORDER_SERVED`）。下单/加菜不再推送。
 - 推送失败不影响主流程（try-catch 吞没）。
 - 前端容错：心跳 + 有限次重连 + HTTP 快照补齐。
 
-### 8.4 模拟支付
+### 8.4 模拟支付（先付后做）
 
 - 不接第三方支付；流水号 = `SIM_` + `System.currentTimeMillis()`。
-- ORDERED 状态结账仅登记 `pay_time`/`payment_trade_no`；出餐时检测 `pay_time != null` 自动流转 PAID。
-- 结账时级联合并支付全部未支付子订单（流水号 `_1`、`_2` 后缀）。
-- 幂等与并发：应用层预校验（状态合法 + `pay_time` 为空）只做友好报错，最终裁决下沉为 SQL 条件更新——`UPDATE oms_order ... WHERE id=? AND status IN (0,10) AND pay_time IS NULL`（SERVED 经 `CASE WHEN` 同步流转 PAID），影响行数 0 即被并发抢先，报错提示；`uk_payment_trade_no` 唯一索引兜底。
+- **先付后做**：下单后有 15 分钟支付窗口（`smart-kitchen.order.pay-timeout-ms`，默认 900000）；ORDERED 状态支付仅登记 `pay_time`/`payment_trade_no`（状态保持 0），支付成功的 ORDERED 单在事务提交后推厨房看板 `NEW_ORDER`；出餐时检测 `pay_time != null` 自动流转 PAID。
+- 支付时级联合并支付全部未支付子订单（流水号 `_1`、`_2` 后缀，各自推看板）；**父单已支付但仍有未支付子单时允许再支付**，只给未支付子单写 `pay_time`（加菜后补付场景）。
+- 幂等与并发：应用层预校验只做友好报错，最终裁决下沉为 SQL 条件更新——`UPDATE oms_order ... WHERE id=? AND status IN (0,10) AND pay_time IS NULL`（SERVED 经 `CASE WHEN` 同步流转 PAID），影响行数 0 即被并发抢先，报错提示；`uk_payment_trade_no` 唯一索引兜底。
 - 扩展点：未来接入微信支付可抽取支付策略接口替换实现。
 
-### 8.5 RabbitMQ 订单超时自动取消
+### 8.5 RabbitMQ 支付超时自动取消（插件延迟 + 发送可靠性 + 扫表兜底）
 
-**方案选型**：DLX（死信交换机）+ TTL，无需额外插件，消息持久化 + 手动 ACK 保证可靠性。
+**方案选型**：`rabbitmq_delayed_message_exchange` 插件（`x-delayed-message` 交换机）。消息在延迟交换机内部等待消息头 `x-delay`（15 分钟，`smart-kitchen.order.pay-timeout-ms`）到期后，再按 routing key 投递到已绑定队列。**不使用**「TTL 队列 + 死信转发」充当到期语义；DLQ 只承载消费失败的异常消息。
+
+本地/Docker 启用插件：`rabbitmq-plugins enable rabbitmq_delayed_message_exchange`（插件已随官方镜像分发，启用即可，无需下载）。测试环境 listener `auto-startup=false`，单测 mock `RabbitTemplate`，不依赖真实插件。
 
 **拓扑**：
 
 ```
-submitOrder() 落库成功
-  → convertAndSend(order.delay.exchange, rk=order.delay, body=orderId)
-  → order.delay.queue（x-message-ttl=1800000ms，DLX=order.timeout.exchange，DLK=order.timeout）
-  → 30 分钟过期 → order.timeout.exchange → order.timeout.queue
-  → OrderTimeoutConsumer（手动 ACK）：
-       查订单 → ORDERED/SERVED → cancelOrder()（还库存+级联子订单）
-              → PAID/CANCELLED/不存在 → 跳过并 ACK
-              → 消费异常 → basicNack(requeue=false) → 经超时队列 DLX 投递至 DLQ 待人工补偿
+submitOrder() / addDish() 事务提交成功（afterCommit）
+  → convertAndSend(order.delay.exchange, rk=order.timeout, body=orderId, header x-delay=15min)
+  → order.delay.exchange（type=x-delayed-message，durable，x-delayed-type=direct）
+       绑定 rk=order.timeout
+  → order.timeout.queue（普通 durable 队列，OrderTimeoutConsumer 手动 ACK 监听这里）
+       仅消费失败时 basicNack(requeue=false) → order.timeout.dlx → order.timeout.dlq（人工补偿）
 ```
 
-另配异常兜底 DLX/DLQ（`order.timeout.dlx` / `order.timeout.dlq`），消费异常消息不直接丢弃而是转入 DLQ。连接配置开启 `publisher-confirm-type: correlated` 与 `publisher-returns: true`。
+**消费逻辑**（`OrderTimeoutConsumer`，ackMode=MANUAL）：
+
+- 订单不存在 / 已有 `pay_time` / 状态非 ORDERED → `basicAck` 跳过（超时永不取消 SERVED）；
+- 仅 `ORDERED` 且 `pay_time` 为空 → `cancelOrderForTimeout()`：条件更新 `cancelIfUnpaid`（`status=0 AND pay_time IS NULL`）取消并还库存，原因 `PAY_TIMEOUT`；父单超时可级联未支付子单，子单超时只取消自己；
+- 与支付并发：取消 SQL 影响 0 行视为支付胜出，正常返回 → ACK，不进 DLQ；
+- 业务异常 → `basicNack(deliveryTag, false, false)` 进 DLQ。
+
+**发送可靠性**（`OrderTimeoutMessageSender`，不做本地消息表/Outbox——取消正确性由扫表兜底，outbox 与扫表职责重叠）：
+
+- MySQL 事务先提交，消息在 `afterCommit` 之后才发；MQ 异常不回滚订单/Redis，下单接口一定成功；
+- `convertAndSend` 当场抛错：记日志 + 写 `oms_mq_send_fail`，接口仍返回成功；
+- `publisher-confirm-type: correlated`（`publisher-returns: false`，不设 mandatory）：ack 仅 debug 日志；nack 由独立线程池异步重试最多 3 次（间隔 0.5s/1s/2s，不占 HTTP 线程），仍失败写 `oms_mq_send_fail` + error 日志后停止，交给扫表；
+- `RabbitTemplate` 保持 `@Autowired(required = false)`，未配置 MQ 时发送直接落失败表。
+
+**扫表兜底**（`OrderTimeoutScanTask`）：`@Scheduled` 默认每 2 分钟一次（`smart-kitchen.order.timeout-scan-ms`，默认 120000；不大于 5 分钟以免 15 分钟窗口被拖长）。扫描 `status=0 AND pay_time IS NULL AND create_time < now()-15min`，每次 `LIMIT 100`，父单子单均命中，走与消费者相同的 `cancelOrderForTimeout` 条件更新（重复扫描安全）。MQ 宕机、插件未装、confirm nack 三次、进程在 afterCommit 前崩溃等场景下，未支付单仍会在约 15～17 分钟被关单并还库存。测试 profile 用 `smart-kitchen.order.timeout-scan-enabled=false` 关闭该 Bean。
 
 ### 8.6 LangGraph 备菜预测工作流
 
@@ -657,7 +693,8 @@ START ─┬─→ get_sales_30d ──→ time_series_predict ─┐
 | 客服 LLM 成本高 | 语义缓存（Milvus 向量检索，相似度 ≥0.92 命中）；embedding/向量库异常时降级为不缓存直调 LLM |
 | 客服工具无结果 | Prompt 固定话术，不编造 |
 | WS 推送失败 | 捕获异常不影响交易主流程；前端快照兜底 |
-| MQ 消费异常 | 记录日志后 ACK，人工补偿 |
+| MQ 消费异常 | basicNack(requeue=false) 进 `order.timeout.dlq`，人工补偿 |
+| MQ 发送失败（宕机/插件未装/confirm nack） | 下单不受影响；confirm nack 异步重试 3 次后写 `oms_mq_send_fail`；未支付单由 2 分钟扫表兜底关单还库存 |
 | 小程序低版本不支持分块传输 | 降级为普通 POST 整包返回 |
 
 ---
@@ -671,7 +708,10 @@ START ─┬─→ get_sales_30d ──→ time_series_predict ─┐
 | `server.port` | 服务端口 | 8080 |
 | `spring.datasource.*` | MySQL（`${DB_HOST}:3306/smart_kitchen`，Hikari 池 5–20） | localhost |
 | `spring.data.redis.*` | Redis 连接（Lettuce 池） | localhost:6379 |
-| `spring.rabbitmq.*` | MQ 连接 + publisher-confirm/returns | localhost:5672 |
+| `spring.rabbitmq.*` | MQ 连接 + `publisher-confirm-type: correlated`、`publisher-returns: false` | localhost:5672 |
+| `smart-kitchen.order.pay-timeout-ms` | 先付后做支付窗口（MQ x-delay 与扫表共用口径） | 900000（15min） |
+| `smart-kitchen.order.timeout-scan-ms` | 未支付超时扫表间隔 | 120000（2min） |
+| `smart-kitchen.order.timeout-scan-enabled` | 扫表任务开关（测试 profile 关闭） | true |
 | `smart-kitchen.jwt.secret` | JWT HMAC 密钥 | 环境变量 |
 | `smart-kitchen.jwt.access-expiration` | Access Token 有效期 ms | 7200000（2h） |
 | `smart-kitchen.jwt.refresh-expiration` | Refresh Token 有效期 ms | 604800000（7d） |
@@ -706,10 +746,10 @@ START ─┬─→ get_sales_30d ──→ time_series_predict ─┐
 | 层 | 内容 | 位置 |
 |----|------|------|
 | Java 集成测试 | Controller 集成测试（认证含 BCrypt/双 Token/黑名单/ADMIN 403、座位/分类/菜品/代理/订单/评价/库存/知识库/预测/Phase6 接口），合计 71 项 | `smart-kitchen/src/test/.../controller/` |
-| Java 单元测试 | `CategoryServiceTest`、`KnowledgeDocumentServiceTest`（落库后 DEL 指纹）、`OrderTimeoutConsumerTest`（正常超时取消、已支付跳过、已撤销跳过、订单不存在、异常 Nack 进 DLQ） | `.../service/` |
-| Java 并发测试 | `OrderServiceConcurrencyTest`（CountDownLatch 多线程并发支付/出餐/支付vs撤销竞争，断言条件更新恰好一笔生效）、`OrderServiceSubmitRollbackTest`（MySQL 扣减返回 0 → 订单不落库 + Redis 回滚；ARGV 含初值、无 hasKey 预热） | `.../service/` |
+| Java 单元测试 | `CategoryServiceTest`、`KnowledgeDocumentServiceTest`（落库后 DEL 指纹）、`OrderTimeoutConsumerTest`（未支付 ORDERED 超时取消、已支付/非 ORDERED/不存在跳过、SERVED 永不超时取消、异常 Nack 进 DLQ）、`OrderTimeoutMessageSenderTest`（x-delay 头、当场抛错落表、confirm nack 异步重试 3 次后落表） | `.../service/` |
+| Java 并发测试 | `OrderServiceConcurrencyTest`（CountDownLatch 多线程并发支付/出餐/支付vs撤销竞争，断言条件更新恰好一笔生效）、`OrderServiceSubmitRollbackTest`（MySQL 扣减返回 0 → 订单不落库 + Redis 回滚；ARGV 含初值、无 hasKey 预热）、`OrderServicePayFirstFlowTest`（先付后做：下单不推看板/支付才推、未支付禁加菜、子单补付、支付 vs 超时只成功一笔、扫表兜底取消还库存） | `.../service/` |
 | WebSocket 鉴权测试 | `WebSocketAuthInterceptorTest`（合法/缺失/非法 token、越权连看板、会话按 token userId 绑定） | `.../config/` |
-| 测试环境 | H2 内存库 + `application-test.yml`（`schema-h2.sql` / `data-h2.sql`）；测试时 MQ listener 关闭自动启动 | `src/test/resources/` |
+| 测试环境 | H2 内存库 + `application-test.yml`（`schema-h2.sql` / `data-h2.sql`）；测试时 MQ listener 关闭自动启动、扫表任务 Bean 关闭（`timeout-scan-enabled=false`） | `src/test/resources/` |
 | Python 测试 | MCP 工具（天气/节假日）、预测链路、RAG 接口、语义缓存（含指纹 invalidate 后重算）；库存 Lua 脚本并发压测（含 key 缺失初始化与返还 SET） | `smart-kitchen-ai/tests/`、`test_rag.py`、`tests/test_stock_concurrency.py` |
 | 接口压测 | `/api/order/submit` 多线程并发下单（真实应用 + MySQL/Redis/RabbitMQ），断言不超卖并输出延迟分位 | `tests/load_order_submit.py` |
 | 小程序校验 | 静态结构校验（页面三件套、tabBar、工具方法、登录流程关键函数） | `tests/test_miniprogram.py` |
@@ -724,7 +764,7 @@ START ─┬─→ get_sales_30d ──→ time_series_predict ─┐
 |------|-----------|
 | MySQL 8 | 官方镜像 + 初始化挂载 `schema.sql` + 数据卷 |
 | Redis | 官方镜像 |
-| RabbitMQ | `rabbitmq:management` 镜像 |
+| RabbitMQ | `rabbitmq:management` 镜像，必须启用延迟插件：`rabbitmq-plugins enable rabbitmq_delayed_message_exchange`（compose 中以 command 或启用插件的衍生镜像配置） |
 | smart-kitchen | Maven 多阶段构建 → JRE 21 运行时 |
 | smart-kitchen-ai | Python 镜像 + `requirements.txt`（注意 Milvus Lite 数据文件挂载卷） |
 | admin-web | `npm run build` → Nginx 托管静态资源 + 反代 `/api`、`/ws` |

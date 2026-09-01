@@ -44,7 +44,7 @@ spring:
     password: ${MQ_PWD:guest}
     virtual-host: /
     publisher-confirm-type: correlated
-    publisher-returns: true
+    publisher-returns: false
 
 # MyBatis-Plus 配置
 mybatis-plus:
@@ -59,6 +59,10 @@ mybatis-plus:
 
 # 业务自定义配置
 smart-kitchen:
+  order:
+    pay-timeout-ms: ${ORDER_PAY_TIMEOUT_MS:900000} # 先付后做：下单后支付窗口 15 分钟（MQ x-delay 与扫表口径一致）
+    timeout-scan-ms: ${ORDER_TIMEOUT_SCAN_MS:120000} # 未支付超时单扫表兜底间隔，默认 2 分钟
+    timeout-scan-enabled: ${ORDER_TIMEOUT_SCAN_ENABLED:true} # 测试 profile 关闭
   jwt:
     secret: ${JWT_SECRET:smartKitchenSecretKeyPleaseChangeInProdEnv}
     access-expiration: ${JWT_ACCESS_EXPIRATION:7200000} # Access Token 2 hours

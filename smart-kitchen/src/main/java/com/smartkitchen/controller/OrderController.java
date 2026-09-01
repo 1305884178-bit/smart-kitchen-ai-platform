@@ -43,7 +43,7 @@ public class OrderController {
     }
 
     /**
-     * 结账支付（将订单状态变更为PAID，并通知厨房看板）
+     * 支付（先付后做：登记 pay_time，支付成功后才推厨房看板 NEW_ORDER；有未支付子单时可补付）
      * @param id 订单ID
      * @return 返回支付结果
      */

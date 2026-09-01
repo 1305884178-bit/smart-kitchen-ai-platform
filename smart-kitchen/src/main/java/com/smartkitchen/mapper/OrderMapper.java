@@ -68,4 +68,30 @@ public interface OrderMapper extends BaseMapper<Order> {
                        @Param("newStatus") int newStatus,
                        @Param("completeTime") LocalDateTime completeTime,
                        @Param("orderedCode") int orderedCode);
+
+    /**
+     * 支付超时取消（状态校验下沉 SQL）：仅当订单处于 ORDERED 且未支付时才更新为 CANCELLED。
+     * 与支付并发时二者只能成功一笔：pay_time IS NULL 条件被支付方抢先打破则影响 0 行。
+     *
+     * @return 影响行数，0 表示订单已被支付/并发修改，调用方视为支付胜出，直接跳过
+     */
+    @Update("UPDATE oms_order " +
+            "SET status = #{cancelledCode}, cancel_reason = #{cancelReason}, update_time = NOW() " +
+            "WHERE id = #{id} AND status = #{orderedCode} AND pay_time IS NULL")
+    int cancelIfUnpaid(@Param("id") Long id,
+                       @Param("cancelReason") String cancelReason,
+                       @Param("orderedCode") int orderedCode,
+                       @Param("cancelledCode") int cancelledCode);
+
+    /**
+     * 扫表兜底：查询超时未支付订单（status=ORDERED 且 pay_time IS NULL 且 create_time 早于截止时间），
+     * 父单、子单都会命中；每次最多 100 条，重复扫描安全（取消走条件更新）。
+     *
+     * @param deadline 截止时间（now - 支付窗口）
+     * @return 超时未支付订单 ID 列表
+     */
+    @Select("SELECT id FROM oms_order " +
+            "WHERE status = 0 AND pay_time IS NULL AND create_time < #{deadline} " +
+            "ORDER BY id LIMIT 100")
+    List<Long> selectTimeoutUnpaidOrderIds(@Param("deadline") LocalDateTime deadline);
 }

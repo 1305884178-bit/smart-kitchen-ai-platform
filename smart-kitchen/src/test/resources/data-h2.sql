@@ -49,9 +49,9 @@ INSERT INTO `oms_order_detail` (`id`, `order_id`, `dish_id`, `dish_name`, `quant
 (2, 1, 4, '拍黄瓜', 1, 18.00, 0, NOW());
 
 
--- 订单 B：状态为 SERVED（10：厨房已出餐，待顾客结账）
-INSERT INTO `oms_order` (`id`, `order_no`, `user_id`, `seat_number`, `total_amount`, `status`, `remark`, `create_time`, `update_time`) VALUES
-(2, 'ORD202607170002', 1002, 'B02', 48.00, 10, '饮料要常温的', DATEADD(MINUTE, -30, NOW()), DATEADD(MINUTE, -30, NOW()));
+-- 订单 B：状态为 SERVED（10：厨房已出餐）；先付后做口径下出餐前必已支付，故带 pay_time
+INSERT INTO `oms_order` (`id`, `order_no`, `user_id`, `seat_number`, `total_amount`, `status`, `pay_time`, `payment_trade_no`, `remark`, `create_time`, `update_time`) VALUES
+(2, 'ORD202607170002', 1002, 'B02', 48.00, 10, DATEADD(MINUTE, -25, NOW()), 'SIM_SEED_2', '饮料要常温的', DATEADD(MINUTE, -30, NOW()), DATEADD(MINUTE, -30, NOW()));
 
 -- 订单 B 的明细：宫保鸡丁 x1 (38) + 可口可乐 x2 (5*2=10)
 INSERT INTO `oms_order_detail` (`id`, `order_id`, `dish_id`, `dish_name`, `quantity`, `price`, `is_added`, `create_time`) VALUES

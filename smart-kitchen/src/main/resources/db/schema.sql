@@ -37,8 +37,20 @@ CREATE TABLE IF NOT EXISTS `oms_order` (
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_no` (`order_no`),
-  UNIQUE KEY `uk_payment_trade_no` (`payment_trade_no`)
+  UNIQUE KEY `uk_payment_trade_no` (`payment_trade_no`),
+  KEY `idx_timeout_scan` (`status`, `pay_time`, `create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单主表';
+
+-- 1.1 延迟消息发送失败记录表（confirm nack 三次或 convertAndSend 抛错时写入，配合扫表兜底）
+CREATE TABLE IF NOT EXISTS `oms_mq_send_fail` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增',
+  `order_id` bigint NOT NULL COMMENT '关联订单',
+  `reason` varchar(512) DEFAULT NULL COMMENT '失败原因',
+  `retry_count` int NOT NULL DEFAULT '0' COMMENT '已重试次数',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_order_id` (`order_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单延迟消息发送失败记录';
 
 -- 2. 订单明细表
 CREATE TABLE IF NOT EXISTS `oms_order_detail` (

@@ -15,8 +15,14 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 
 /**
- * 订单超时消费者
- * 监听超时消费队列，处理 30 分钟未支付的自动取消逻辑
+ * 订单支付超时消费者（先付后做：15 分钟未支付自动取消）
+ *
+ * 监听 order.timeout.queue（由 x-delayed-message 延迟交换机到期投递），手动 ACK：
+ * - 订单不存在 / 已有 pay_time / 状态不是 ORDERED → basicAck 跳过，不取消；
+ * - 仅 ORDERED 且 pay_time 为空 → cancelOrderForTimeout（取消原因 PAY_TIMEOUT，返还库存，
+ *   父单可级联未支付子单，子单超时只取消自己）；
+ * - 与支付并发：取消 SQL 影响 0 行视为支付胜出，方法正常返回 → ACK，不进 DLQ；
+ * - 业务异常 → basicNack(deliveryTag, false, false) 进 DLQ 待人工补偿。
  */
 @Component
 public class OrderTimeoutConsumer {
@@ -27,7 +33,7 @@ public class OrderTimeoutConsumer {
     private OrderService orderService;
 
     /**
-     * 消费订单超时消息，校验订单状态后执行自动取消
+     * 消费订单支付超时消息，校验订单状态后执行自动取消
      * @param orderIdStr 订单ID字符串
      * @param channel RabbitMQ 通道，用于手动ACK
      * @param deliveryTag 消息投递标签
@@ -44,14 +50,15 @@ public class OrderTimeoutConsumer {
                 return;
             }
 
-            Integer status = order.getStatus();
-            // 仅 ORDERED / SERVED 状态执行自动取消
-            if (status != null && (status == OrderStatusEnum.ORDERED.getCode()
-                    || status == OrderStatusEnum.SERVED.getCode())) {
-                log.info("订单超时自动取消，orderId={}, 当前状态={}", orderId, status);
-                orderService.cancelOrder(orderId);
+            // 仅「ORDERED 且未支付」执行超时取消；已支付（pay_time 非空）/ 非 ORDERED 一律跳过。
+            // 超时永不取消 SERVED。
+            if (order.getStatus() != null && order.getStatus() == OrderStatusEnum.ORDERED.getCode()
+                    && order.getPayTime() == null) {
+                log.info("订单支付超时自动取消，orderId={}", orderId);
+                orderService.cancelOrderForTimeout(orderId);
             } else {
-                log.info("订单超时跳过：订单已支付或已撤销，orderId={}, 当前状态={}", orderId, status);
+                log.info("订单超时跳过：已支付或状态非 ORDERED，orderId={}, status={}, payTime={}",
+                        orderId, order.getStatus(), order.getPayTime());
             }
 
             channel.basicAck(deliveryTag, false);

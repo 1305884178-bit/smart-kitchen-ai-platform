@@ -8,8 +8,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# 个人面试笔记，不上传
+# 个人面试笔记，不上传（与 PRD 同级，仅本地复习）
 面试前需要考虑的问题.md
+*面试题.md
 
 # Python 依赖安装目录（本地构建产物）
 smart-kitchen-ai/.deps/

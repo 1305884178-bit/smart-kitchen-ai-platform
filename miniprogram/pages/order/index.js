@@ -125,13 +125,32 @@ Page({
     })
       .then(() => {
         cart.clearCart();
-        wx.showToast({ title: '下单成功', icon: 'success' });
+        wx.showToast({ title: '下单成功，请支付', icon: 'success' });
+        // 先付后做：下单成功进订单详情去支付（15 分钟内未支付将自动取消）
         setTimeout(() => {
-          wx.reLaunch({ url: '/pages/my-orders/index' });
+          this._gotoLatestOrderDetail();
         }, 1000);
       })
       .catch(() => {
         this.setData({ submitting: false });
+      });
+  },
+
+  /**
+   * 跳转最新一笔订单的详情页（去支付）；失败时兜底回我的订单列表
+   */
+  _gotoLatestOrderDetail() {
+    request.get('/api/order/my-list', { page: 1, size: 1 }, { showError: false })
+      .then(result => {
+        const first = result && result.records && result.records[0];
+        if (first) {
+          wx.redirectTo({ url: '/pages/order-detail/index?id=' + first.id });
+        } else {
+          wx.reLaunch({ url: '/pages/my-orders/index' });
+        }
+      })
+      .catch(() => {
+        wx.reLaunch({ url: '/pages/my-orders/index' });
       });
   }
 });

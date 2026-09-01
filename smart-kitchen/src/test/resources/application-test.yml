@@ -16,6 +16,10 @@ spring:
         auto-startup: false
 
 smart-kitchen:
+  order:
+    pay-timeout-ms: 900000
+    timeout-scan-ms: 120000
+    timeout-scan-enabled: false # 测试环境不启动扫表调度，单测直接调任务方法
   jwt:
     secret: test-secret-key-must-be-at-least-32-bytes-long
     access-expiration: 7200000
