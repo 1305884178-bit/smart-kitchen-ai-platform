@@ -1,0 +1,27 @@
+{
+  "description": "RAG 检索评测集：golden 为 scripts/knowledge_corpus.py 中的菜品名（命中任一即算召回）；expect_empty=true 表示低相关 query，应被 RAG_SCORE_THRESHOLD 过滤为空而不是返回噪声 top3。",
+  "cases": [
+    {"id": "rag-01", "query": "有清淡的汤吗", "golden": ["玉米萝卜排骨汤", "椰子乌鸡汤"], "expect_empty": false},
+    {"id": "rag-02", "query": "小孩能喝什么汤", "golden": ["玉米萝卜排骨汤"], "expect_empty": false},
+    {"id": "rag-03", "query": "有什么招牌菜", "golden": ["黑叉烧"], "expect_empty": false},
+    {"id": "rag-04", "query": "下饭菜推荐", "golden": ["黑叉烧", "五柳炸蛋"], "expect_empty": false},
+    {"id": "rag-05", "query": "想吃甜口的肉", "golden": ["黑叉烧"], "expect_empty": false},
+    {"id": "rag-06", "query": "一个人吃什么好", "golden": ["干炒牛河"], "expect_empty": false},
+    {"id": "rag-07", "query": "有什么主食推荐", "golden": ["干炒牛河", "白米饭"], "expect_empty": false},
+    {"id": "rag-08", "query": "有什么青菜", "golden": ["蒜蓉炒菜心", "蒜蓉粉丝娃娃菜"], "expect_empty": false},
+    {"id": "rag-09", "query": "宴请点什么菜", "golden": ["粉丝蒸扇贝"], "expect_empty": false},
+    {"id": "rag-10", "query": "有没有滋补的汤", "golden": ["椰子乌鸡汤"], "expect_empty": false},
+    {"id": "rag-11", "query": "吃烧味配什么茶", "golden": ["铁观音"], "expect_empty": false},
+    {"id": "rag-12", "query": "有什么凉菜", "golden": ["和味爽鱼皮"], "expect_empty": false},
+    {"id": "rag-13", "query": "下酒菜推荐", "golden": ["和味爽鱼皮", "珠江啤酒"], "expect_empty": false},
+    {"id": "rag-14", "query": "酸甜口的菜有什么", "golden": ["五柳炸蛋"], "expect_empty": false},
+    {"id": "rag-15", "query": "有什么解腻的饮料", "golden": ["柠檬茶", "天地一号"], "expect_empty": false},
+    {"id": "rag-16", "query": "不喝酒有什么选择", "golden": ["天地一号"], "expect_empty": false},
+    {"id": "rag-17", "query": "有米饭吗", "golden": ["白米饭"], "expect_empty": false},
+    {"id": "rag-18", "query": "今天天气怎么样", "golden": [], "expect_empty": true},
+    {"id": "rag-19", "query": "帮我写个Python代码", "golden": [], "expect_empty": true},
+    {"id": "rag-20", "query": "股票今天涨了吗", "golden": [], "expect_empty": true},
+    {"id": "rag-21", "query": "怎么换汽车轮胎", "golden": [], "expect_empty": true},
+    {"id": "rag-22", "query": "附近哪里有加油站", "golden": [], "expect_empty": true}
+  ]
+}

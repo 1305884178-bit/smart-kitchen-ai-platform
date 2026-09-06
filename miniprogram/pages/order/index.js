@@ -125,7 +125,9 @@ Page({
     })
       .then(() => {
         cart.clearCart();
-        wx.showToast({ title: '下单成功，请支付', icon: 'success' });
+        // 注意：showToast 设置 icon 时标题最多显示 7 个汉字，超出会被截断；
+        // 「下单成功，请支付」共 8 个字，必须用 icon: 'none' 才能完整显示
+        wx.showToast({ title: '下单成功，请支付', icon: 'none' });
         // 先付后做：下单成功进订单详情去支付（15 分钟内未支付将自动取消）
         setTimeout(() => {
           this._gotoLatestOrderDetail();

@@ -15,7 +15,10 @@ import com.smartkitchen.service.CategoryService;
 import com.smartkitchen.service.DishService;
 import com.smartkitchen.service.OrderDetailService;
 import com.smartkitchen.service.ReviewService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -28,6 +31,11 @@ import java.util.stream.Collectors;
 @Service
 public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements DishService {
 
+    private static final Logger log = LoggerFactory.getLogger(DishServiceImpl.class);
+
+    /** 与 deduct_stock.lua / return_stock.lua 同一 key 规则 */
+    private static final String STOCK_PREFIX = "dish:stock:";
+
     @Autowired
     private CategoryService categoryService;
 
@@ -36,6 +44,9 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
 
     @Autowired
     private ReviewService reviewService;
+
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
 
     /**
      * 根据分类ID查询起售状态的菜品列表
@@ -125,9 +136,11 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
     }
 
     /**
-     * 根据菜品名称模糊查询菜品库存信息
+     * 根据菜品名称模糊查询菜品库存信息。
+     * 库存口径与下单一致：优先读 Redis 库存 key（dish:stock:{dishId}，即 deduct_stock.lua
+     * 扣减的同一份数据），miss 时用 MySQL daily_stock 回源写入；Redis 异常降级为 MySQL 值。
      * @param dishName 菜品名称
-     * @return 库存VO，未找到返回null
+     * @return 库存VO（dailyStock 为可下单剩余），未找到返回null
      */
     @Override
     public DishInventoryVO getInventoryByName(String dishName) {
@@ -137,9 +150,31 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
         }
         DishInventoryVO vo = new DishInventoryVO();
         vo.setName(dish.getName());
-        vo.setDailyStock(dish.getDailyStock());
+        vo.setDailyStock(resolveRemainingStock(dish));
         vo.setStatus(dish.getStatus());
         return vo;
+    }
+
+    /**
+     * 可下单剩余库存：Redis 命中直接返回；miss 回源 MySQL 并写入（与 Lua 内初始化同值）；
+     * Redis 不可用时不影响查询，降级返回 MySQL daily_stock。
+     */
+    private Integer resolveRemainingStock(Dish dish) {
+        String key = STOCK_PREFIX + dish.getId();
+        try {
+            String cached = stringRedisTemplate.opsForValue().get(key);
+            if (cached != null) {
+                return Integer.parseInt(cached);
+            }
+            Integer stock = dish.getDailyStock();
+            if (stock != null) {
+                stringRedisTemplate.opsForValue().set(key, String.valueOf(stock));
+            }
+            return stock;
+        } catch (Exception e) {
+            log.warn("读取 Redis 库存失败，降级为 MySQL daily_stock（dishId={}）: {}", dish.getId(), e.getMessage());
+            return dish.getDailyStock();
+        }
     }
 
     /**

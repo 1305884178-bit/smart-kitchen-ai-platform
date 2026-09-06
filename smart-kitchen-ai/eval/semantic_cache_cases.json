@@ -1,0 +1,22 @@
+{
+  "description": "语义缓存评测集：近义问句对。query 为当前提问，cached_question 为假设已缓存的历史问句；expect=hit 表示应命中（相似度 >= SEMANTIC_CACHE_THRESHOLD 0.92），miss 表示不应命中。hard_negative 标记的是同句型不同语义的高危对，用于观察误命中率。",
+  "cases": [
+    {"id": "cache-01", "query": "水煮鱼辣不辣", "cached_question": "水煮鱼辣吗", "expect": "hit", "note": "同义换说法"},
+    {"id": "cache-02", "query": "推荐一个辣菜", "cached_question": "有什么辣的菜推荐", "expect": "hit", "note": "同义换说法"},
+    {"id": "cache-03", "query": "黑叉烧是甜的吗", "cached_question": "黑叉烧甜不甜", "expect": "hit", "note": "同义换说法"},
+    {"id": "cache-04", "query": "有没有清淡的汤", "cached_question": "有清淡点的汤吗", "expect": "hit", "note": "同义换说法"},
+    {"id": "cache-05", "query": "干炒牛河好吃吗", "cached_question": "干炒牛河怎么样", "expect": "hit", "note": "同义换说法"},
+    {"id": "cache-06", "query": "小孩能喝什么汤", "cached_question": "适合小孩喝的汤有哪些", "expect": "hit", "note": "同义换说法"},
+    {"id": "cache-07", "query": "你们有什么招牌菜", "cached_question": "招牌菜是什么", "expect": "hit", "note": "同义换说法"},
+    {"id": "cache-08", "query": "柠檬茶可以做热的吗", "cached_question": "柠檬茶有热饮吗", "expect": "hit", "note": "同义换说法"},
+    {"id": "cache-09", "query": "水煮鱼辣不辣", "cached_question": "宫保鸡丁辣不辣", "expect": "miss", "hard_negative": true, "note": "同句型不同菜名，命中即串答"},
+    {"id": "cache-10", "query": "黑叉烧还有吗", "cached_question": "黑叉烧甜吗", "expect": "miss", "hard_negative": true, "note": "同菜名不同意图（库存 vs 口味）"},
+    {"id": "cache-11", "query": "有什么清淡的汤", "cached_question": "有什么清淡的素菜", "expect": "miss", "hard_negative": true, "note": "汤 vs 素菜"},
+    {"id": "cache-12", "query": "柠檬茶多少钱", "cached_question": "柠檬茶好喝吗", "expect": "miss", "hard_negative": true, "note": "价格 vs 口味"},
+    {"id": "cache-13", "query": "推荐一个辣菜", "cached_question": "推荐一个不辣的菜", "expect": "miss", "hard_negative": true, "note": "反义词对，命中即答反"},
+    {"id": "cache-14", "query": "干炒牛河辣吗", "cached_question": "干炒牛河是什么", "expect": "miss", "hard_negative": true, "note": "口味 vs 释义"},
+    {"id": "cache-15", "query": "椰子乌鸡汤甜吗", "cached_question": "椰子乌鸡汤还有吗", "expect": "miss", "hard_negative": true, "note": "口味 vs 库存"},
+    {"id": "cache-16", "query": "今天天气怎么样", "cached_question": "有什么招牌菜", "expect": "miss", "note": "完全无关"},
+    {"id": "cache-17", "query": "蒜蓉炒菜心怎么做", "cached_question": "蒜蓉炒菜心辣不辣", "expect": "miss", "hard_negative": true, "note": "做法 vs 口味"}
+  ]
+}

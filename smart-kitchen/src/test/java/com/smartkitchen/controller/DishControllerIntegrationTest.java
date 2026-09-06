@@ -110,4 +110,19 @@ public class DishControllerIntegrationTest {
         assertEquals(404, result.getCode());
         assertNull(result.getData());
     }
+
+    @Test
+    public void testGetCategoryList_customerToken_shouldSucceed() throws Exception {
+        String responseContent = mockMvc.perform(get("/api/dish/category/list")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        Result<List<com.smartkitchen.entity.Category>> result = objectMapper.readValue(
+                responseContent, new TypeReference<Result<List<com.smartkitchen.entity.Category>>>() {});
+        assertEquals(200, result.getCode());
+        assertNotNull(result.getData());
+        assertFalse(result.getData().isEmpty());
+    }
 }

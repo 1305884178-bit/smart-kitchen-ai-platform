@@ -100,6 +100,15 @@ class TestLookup:
 
         assert answer is None
 
+    def test_lookup_embeds_exact_given_text(self, service):
+        # 缓存层对传入文本不做二次加工：调用方（ChatService）传入的改写句
+        # 原样进入 embedding，保证 key 与检索词一致（如「水煮鱼辣不辣」而非「这个辣不辣」）
+        service.mocks.get_client.return_value = make_milvus_client([])
+
+        service.lookup("水煮鱼辣不辣")
+
+        service.mocks.embeddings.embed_query.assert_called_once_with("水煮鱼辣不辣")
+
 
 # ---------- SemanticCacheService.store ----------
 

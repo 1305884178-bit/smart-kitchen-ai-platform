@@ -3,6 +3,7 @@ package com.smartkitchen.service;
 import com.smartkitchen.dto.KnowledgeUploadDTO;
 import com.smartkitchen.dto.PredictConfirmDTO;
 import com.smartkitchen.dto.PredictTriggerDTO;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 
@@ -40,9 +41,24 @@ public interface PythonAIService {
     Map<String, Object> confirmPrediction(PredictConfirmDTO dto);
 
     /**
-     * 上传知识库文档
+     * 上传知识库文档（代理调用 Python /ai/knowledge/process）
      * @param dto 文档内容和元数据
+     * @param documentId 文档ID（MySQL 元数据行 id，作为 Milvus document_id）
      * @return Python返回结果
      */
-    Map<String, Object> uploadKnowledge(KnowledgeUploadDTO dto);
+    Map<String, Object> uploadKnowledge(KnowledgeUploadDTO dto, String documentId);
+
+    /**
+     * 删除知识库文档向量（代理调用 Python /ai/knowledge/delete）
+     * @param documentId 文档ID（Milvus document_id）
+     * @return Python返回结果
+     */
+    Map<String, Object> deleteKnowledge(String documentId);
+
+    /**
+     * OCR 识别文件内容（代理调用 Python /ai/knowledge/ocr）
+     * @param file 图片（png/jpg/jpeg）或扫描版 PDF
+     * @return 识别出的纯文本
+     */
+    String ocrFile(MultipartFile file);
 }

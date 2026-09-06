@@ -57,7 +57,7 @@ Page({
    * 加载分类列表
    */
   _loadCategories() {
-    request.get('/api/admin/dish/category/list', {}, { showError: false })
+    request.get('/api/dish/category/list', {}, { showError: false })
       .then(categories => {
         const all = [{ id: 0, name: '全部' }, ...categories];
         this.setData({ categories: all });
@@ -255,9 +255,10 @@ Page({
           showCartPopup: false
         });
         this._updateCartBadge();
-        wx.showToast({ title: '加菜成功', icon: 'success' });
+        wx.showToast({ title: '加菜成功，请支付', icon: 'none' });
+        // 加菜成功后跳转到该订单的详情页（非 tabBar 页面，用 navigateTo），便于立即补付加菜金额
         setTimeout(() => {
-          wx.switchTab({ url: '/pages/my-orders/index' });
+          wx.navigateTo({ url: '/pages/order-detail/index?id=' + addToOrderId });
         }, 1000);
       });
   }

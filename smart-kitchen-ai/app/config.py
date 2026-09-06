@@ -34,6 +34,27 @@ class Settings:
     # 知识库版本指纹在 Redis 中的缓存秒数，避免每次提问都查 MySQL
     kb_version_cache_ttl = int(os.getenv("KB_VERSION_CACHE_TTL", "60"))
 
+    # RAG 知识库检索相似度阈值（COSINE distance 下限，低于则丢弃）。
+    # 注意：与语义缓存阈值 0.92 相互独立，禁止共用。
+    # 调参依据（eval/run_eval.py，2026-09-06，text-embedding-v4 + 14 份菜品知识卡）：
+    #   0.60 → Recall@3≈35%；0.55 → Recall@3≈71%；低相关 query 空结果率均为 100%
+    #   （无关 query 距离上限≈0.32，相关命中下限≈0.44，0.55 落在间隔内）。
+    #   embedding 接口存在 ±0.02 抖动，边界 case 在 0.55~0.60 间敏感，微调请重跑评测。
+    rag_score_threshold = float(os.getenv("RAG_SCORE_THRESHOLD", "0.55"))
+
+    # 归档知识文档的 Milvus 向量保留天数，超过后由定时任务物理删除（active 文档永不过期）
+    kb_archived_retention_days = int(os.getenv("KB_ARCHIVED_RETENTION_DAYS", "7"))
+
+    # 多轮对话：送入 ReAct Agent 的最近消息条数（含当前条），禁止全量历史
+    chat_history_max_messages = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "8"))
+
+    # /ai/chat 鉴权：与 Java 端一致的 HS256 JWT 密钥（默认值为 Java application.yml 的开发默认值）
+    jwt_secret = os.getenv("JWT_SECRET", "smartKitchenSecretKeyPleaseChangeInProdEnv")
+    # Java 服务间调用的内部 token（配置后 /ai/knowledge、/ai/predict 强制校验）
+    ai_internal_token = os.getenv("AI_INTERNAL_TOKEN", "")
+    # 客服接口限流：每用户/每 IP 每分钟最大请求数
+    chat_rate_limit_per_minute = int(os.getenv("CHAT_RATE_LIMIT_PER_MINUTE", "30"))
+
     weather_api_key = os.getenv("WEATHER_API_KEY", "")
     weather_city = os.getenv("WEATHER_CITY", "Shenzhen")
 

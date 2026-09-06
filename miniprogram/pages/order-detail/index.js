@@ -155,11 +155,17 @@ Page({
 
   /**
    * 支付
+   * 金额口径： payableAmount 为后端返回的「待支付金额」（仅未支付部分），
+   * 避免加菜补付时把已支付的父单金额重复计入；兼容旧后端则回退 totalAmount
    */
   _onPay() {
+    const order = this.data.order;
+    const payableAmount = (order.payableAmount !== null && order.payableAmount !== undefined)
+      ? order.payableAmount
+      : order.totalAmount;
     wx.showModal({
       title: '确认支付',
-      content: `确认支付 ¥${this.data.order.totalAmount} 吗？`,
+      content: `确认支付 ¥${payableAmount} 吗？`,
       success: (res) => {
         if (res.confirm) {
           request.post(`/api/order/${this.data.orderId}/pay`)

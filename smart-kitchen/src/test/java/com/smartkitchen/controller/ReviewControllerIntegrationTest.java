@@ -49,6 +49,7 @@ public class ReviewControllerIntegrationTest {
     private String adminToken;
     private Long paidOrderId;
     private Long orderedOrderId;
+    private Long paidNotServedOrderId;
 
     @BeforeEach
     public void setup() {
@@ -70,6 +71,16 @@ public class ReviewControllerIntegrationTest {
         orderedOrder.setUserId(1001L);
         orderService.save(orderedOrder);
         orderedOrderId = orderedOrder.getId();
+
+        // 先付后做：已支付（pay_time 非空）但尚未出餐的 ORDERED 订单
+        Order paidNotServedOrder = new Order();
+        paidNotServedOrder.setOrderNo(UUID.randomUUID().toString().replace("-", ""));
+        paidNotServedOrder.setStatus(OrderStatusEnum.ORDERED.getCode());
+        paidNotServedOrder.setTotalAmount(new BigDecimal("80"));
+        paidNotServedOrder.setUserId(1001L);
+        paidNotServedOrder.setPayTime(java.time.LocalDateTime.now());
+        orderService.save(paidNotServedOrder);
+        paidNotServedOrderId = paidNotServedOrder.getId();
     }
 
     @Test
@@ -78,6 +89,25 @@ public class ReviewControllerIntegrationTest {
         review.setOrderId(paidOrderId);
         review.setScore(5);
         review.setComment("Very good!");
+
+        String response = mockMvc.perform(post("/api/review/submit")
+                .header("Authorization", "Bearer " + customerToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(review)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        Result<Object> result = objectMapper.readValue(response, new TypeReference<Result<Object>>() {});
+        assertEquals(200, result.getCode());
+    }
+
+    @Test
+    public void testSubmitReviewSuccessForPaidNotServedOrder() throws Exception {
+        // 先付后做：支付成功（pay_time 非空）即使未出餐（仍为 ORDERED）也可评价
+        Review review = new Review();
+        review.setOrderId(paidNotServedOrderId);
+        review.setScore(4);
+        review.setComment("先付后做，支付后即可评价");
 
         String response = mockMvc.perform(post("/api/review/submit")
                 .header("Authorization", "Bearer " + customerToken)

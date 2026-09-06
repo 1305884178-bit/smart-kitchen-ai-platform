@@ -16,24 +16,16 @@ Page({
   },
 
   /**
-   * 加载菜品详情（使用管理端详情接口获取完整数据）
+   * 加载菜品详情（顾客端接口）
    */
   _loadDishDetail(dishId) {
-    request.get(`/api/admin/dish/detail/${dishId}`)
+    request.get(`/api/dish/detail/${dishId}`)
       .then(dish => {
         this.setData({ dish, loading: false });
       })
       .catch(() => {
-        // 降级：从菜品列表中查找
-        request.get('/api/dish/list')
-          .then(dishes => {
-            const dish = dishes.find(d => d.id == dishId);
-            this.setData({ dish: dish || null, loading: false });
-          })
-          .catch(() => {
-            this.setData({ loading: false });
-            wx.showToast({ title: '加载失败', icon: 'none' });
-          });
+        this.setData({ loading: false });
+        wx.showToast({ title: '加载失败', icon: 'none' });
       });
   },
 

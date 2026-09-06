@@ -30,10 +30,14 @@ public class ReviewServiceImpl extends ServiceImpl<ReviewMapper, Review> impleme
 
     @Override
     public void submitReview(Review review) {
-        // 校验订单状态是否为 PAID
+        // 先付后做：支付成功（pay_time 写入）即具备评价资格，无需等待出餐结账；
+        // 已结账（PAID）订单同样可评价；未支付或已取消的订单不可评价
         Order order = orderService.getById(review.getOrderId());
-        if (order == null || !order.getStatus().equals(OrderStatusEnum.PAID.getCode())) {
-            throw new RuntimeException("只能对已结账的订单进行评价");
+        boolean reviewable = order != null
+                && (order.getStatus().equals(OrderStatusEnum.PAID.getCode())
+                || (order.getPayTime() != null && !order.getStatus().equals(OrderStatusEnum.CANCELLED.getCode())));
+        if (!reviewable) {
+            throw new RuntimeException("只能对已支付的订单进行评价");
         }
 
         // 校验是否已经评价过

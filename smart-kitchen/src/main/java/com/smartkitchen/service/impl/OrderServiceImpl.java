@@ -692,8 +692,31 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 合并状态：所有子订单都完成才算已上菜/已结账
         vo.setStatus(computeMergedStatus(order, childOrders));
 
+        // 待支付金额：只算未支付部分（已支付的父单/子单不重复计入，加菜补付场景只显示加菜金额）
+        vo.setPayableAmount(computePayableAmount(order, childOrders));
+
         vo.setAvailableActions(getAvailableActions(order, childOrders));
         return vo;
+    }
+
+    /**
+     * 计算待支付金额：未支付的父单金额 + 未支付子订单（ORDERED/SERVED）金额合计；已全部支付则为 0
+     */
+    private BigDecimal computePayableAmount(Order parentOrder, List<Order> childOrders) {
+        BigDecimal payable = BigDecimal.ZERO;
+        if (parentOrder.getPayTime() == null
+                && (parentOrder.getStatus() == OrderStatusEnum.ORDERED.getCode()
+                || parentOrder.getStatus() == OrderStatusEnum.SERVED.getCode())) {
+            payable = payable.add(parentOrder.getTotalAmount());
+        }
+        for (Order child : childOrders) {
+            if (child.getPayTime() == null
+                    && (child.getStatus() == OrderStatusEnum.ORDERED.getCode()
+                    || child.getStatus() == OrderStatusEnum.SERVED.getCode())) {
+                payable = payable.add(child.getTotalAmount());
+            }
+        }
+        return payable;
     }
 
     /**
@@ -817,11 +840,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         } else if (status == OrderStatusEnum.SERVED.getCode()) {
             return Arrays.asList("ADD_DISH", "PAY");
         } else if (status == OrderStatusEnum.PAID.getCode()) {
-            boolean hasReviewed = reviewMapper.selectCount(
-                    new LambdaQueryWrapper<Review>()
-                            .eq(Review::getOrderId, order.getId())
-            ) > 0;
-            return hasReviewed ? new ArrayList<>() : List.of("REVIEW");
+            return hasReviewed(order.getId()) ? new ArrayList<>() : List.of("REVIEW");
         } else {
             return new ArrayList<>();
         }
@@ -829,6 +848,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     /**
      * 根据订单状态计算可操作按钮列表（C端用，含子订单合并状态）
+     * 先付后做口径：支付成功（pay_time 写入）即具备评价资格，无需等待出餐结账（PAID）
      * @param parentOrder 父订单对象
      * @param childOrders 子订单列表（加菜订单）
      * @return 可用操作列表
@@ -836,34 +856,58 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     private List<String> getAvailableActions(Order parentOrder, List<Order> childOrders) {
         int status = parentOrder.getStatus();
 
-        // 已结账 → 只能评价
-        if (status == OrderStatusEnum.PAID.getCode()) {
-            boolean hasReviewed = reviewMapper.selectCount(
-                    new LambdaQueryWrapper<Review>()
-                            .eq(Review::getOrderId, parentOrder.getId())
-            ) > 0;
-            return hasReviewed ? new ArrayList<>() : List.of("REVIEW");
-        }
-
         // 已取消 → 无操作
         if (status == OrderStatusEnum.CANCELLED.getCode()) {
             return new ArrayList<>();
         }
 
-        // ORDERED 或 SERVED（先付后做）：
-        // 父单未支付 → 只能支付；父单已支付 → 可加菜；仍有未支付子单 → 继续显示支付（补付子单）
-        List<String> actions = new ArrayList<>();
-        if (parentOrder.getPayTime() == null) {
-            actions.add("PAY");
-            return actions;
-        }
-        actions.add("ADD_DISH");
+        // 仍有未支付子单（ORDERED/SERVED 且 pay_time 为空）→ 允许补付
         boolean hasUnpaidChild = childOrders.stream().anyMatch(c -> c.getPayTime() == null
                 && (c.getStatus() == OrderStatusEnum.ORDERED.getCode()
                 || c.getStatus() == OrderStatusEnum.SERVED.getCode()));
-        if (hasUnpaidChild) {
-            actions.add("PAY");
+        // 支付完成（pay_time 非空）且未评价 → 可评价
+        boolean canReview = parentOrder.getPayTime() != null && !hasReviewed(parentOrder.getId());
+
+        List<String> actions = new ArrayList<>();
+
+        if (status == OrderStatusEnum.ORDERED.getCode() || status == OrderStatusEnum.SERVED.getCode()) {
+            // 父单未支付 → 只能支付
+            if (parentOrder.getPayTime() == null) {
+                actions.add("PAY");
+                return actions;
+            }
+            // 父单已支付 → 可加菜；有未支付子单仍可补付；未评价可评价
+            actions.add("ADD_DISH");
+            if (hasUnpaidChild) {
+                actions.add("PAY");
+            }
+            if (canReview) {
+                actions.add("REVIEW");
+            }
+            return actions;
         }
+
+        // 已结账：有未支付子单仍可补付；未评价可评价
+        if (status == OrderStatusEnum.PAID.getCode()) {
+            if (hasUnpaidChild) {
+                actions.add("PAY");
+            }
+            if (!hasReviewed(parentOrder.getId())) {
+                actions.add("REVIEW");
+            }
+            return actions;
+        }
+
         return actions;
+    }
+
+    /**
+     * 是否已评价（一单一评）
+     */
+    private boolean hasReviewed(Long orderId) {
+        return reviewMapper.selectCount(
+                new LambdaQueryWrapper<Review>()
+                        .eq(Review::getOrderId, orderId)
+        ) > 0;
     }
 }

@@ -2,7 +2,9 @@ package com.smartkitchen.controller;
 
 import com.smartkitchen.common.Result;
 import com.smartkitchen.dto.DishDetailVO;
+import com.smartkitchen.entity.Category;
 import com.smartkitchen.entity.Dish;
+import com.smartkitchen.service.CategoryService;
 import com.smartkitchen.service.DishService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,6 +24,18 @@ public class DishController {
 
     @Autowired
     private DishService dishService;
+
+    @Autowired
+    private CategoryService categoryService;
+
+    /**
+     * 获取菜品分类列表（顾客端菜单 Tab，不要求 ADMIN）
+     * @return 分类列表
+     */
+    @GetMapping("/category/list")
+    public Result<List<Category>> listCategories() {
+        return Result.success(categoryService.listCategories());
+    }
 
     /**
      * 获取菜品列表（包含分类、库存、价格信息）

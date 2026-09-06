@@ -21,4 +21,5 @@ public class KnowledgeDocument {
     private String status;
     private LocalDateTime effectiveFrom;
     private LocalDateTime createTime;
+    private LocalDateTime updateTime;
 }

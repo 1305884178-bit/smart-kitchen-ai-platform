@@ -6,7 +6,7 @@ import time
 from pymilvus import MilvusClient
 
 from app.config import settings
-from app.db.milvus_client import MILVUS_DB_PATH, DIMENSION
+from app.db.milvus_client import MILVUS_DB_PATH, ensure_cache_collection
 from app.db.mysql_client import get_db_connection
 from app.db.redis_client import redis_client
 from app.services.rag_service import embeddings
@@ -37,14 +37,8 @@ class SemanticCacheService:
     def _get_client(self) -> MilvusClient:
         if self._client is None:
             client = MilvusClient(MILVUS_DB_PATH)
-            if not client.has_collection(settings.semantic_cache_collection):
-                client.create_collection(
-                    collection_name=settings.semantic_cache_collection,
-                    dimension=DIMENSION,
-                    auto_id=True,
-                    enable_dynamic_field=True
-                )
-            client.load_collection(settings.semantic_cache_collection)
+            # 不存在时按显式 schema 创建（含 kb_version 标量索引）；已存在则沿用
+            ensure_cache_collection(client, settings.semantic_cache_collection)
             self._client = client
         return self._client
 

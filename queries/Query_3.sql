@@ -1,1 +1,0 @@
-DELETE FROM ai_knowledge_document WHERE version = '20';

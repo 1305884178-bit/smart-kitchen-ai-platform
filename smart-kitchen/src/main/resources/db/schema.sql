@@ -130,9 +130,10 @@ CREATE TABLE IF NOT EXISTS `ai_knowledge_document` (
   `title` varchar(128) NOT NULL COMMENT '文档标题',
   `chunk_count` int NOT NULL DEFAULT '0' COMMENT '分块数',
   `version` varchar(20) NOT NULL DEFAULT '1.0' COMMENT '版本号（字符串标签，与 AI 侧检索过滤值一致，如 v2.0）',
-  `status` varchar(16) NOT NULL DEFAULT 'draft' COMMENT 'draft/active/archived',
+  `status` varchar(16) NOT NULL DEFAULT 'draft' COMMENT 'draft/processing/active/failed/archived',
   `effective_from` datetime DEFAULT NULL COMMENT '生效时间',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间（归档清理任务以此为归档时间口径）',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='RAG文档元数据表';
 

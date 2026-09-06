@@ -1,11 +1,17 @@
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 from app.services.predict_service import trigger_prediction, get_prediction_results, confirm_prediction, get_task_status
+from app.utils.auth import verify_internal_token
 
-router = APIRouter(prefix="/ai/predict", tags=["Predict"])
+# 服务间接口：配置 AI_INTERNAL_TOKEN 后强制校验内部 token（见 utils/auth.py）
+router = APIRouter(
+    prefix="/ai/predict",
+    tags=["Predict"],
+    dependencies=[Depends(verify_internal_token)]
+)
 
 class TriggerRequest(BaseModel):
     target_date: Optional[str] = None
