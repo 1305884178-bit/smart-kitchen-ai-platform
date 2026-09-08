@@ -9,6 +9,8 @@ class Settings:
     mysql_user = os.getenv("DB_USER", "root")
     mysql_pwd = os.getenv("DB_PWD", "")
     mysql_db = os.getenv("DB_NAME", "smart_kitchen")
+    # Python 侧 MySQL 连接池上限（个位数，避免与 Java Hikari 抢连接）；生产建议配只读账号
+    db_pool_size = int(os.getenv("DB_POOL_SIZE", "5"))
 
     redis_host = os.getenv("REDIS_HOST", "localhost")
     redis_port = int(os.getenv("REDIS_PORT", "6379"))

@@ -12,7 +12,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 菜品信息代理控制器，供Python AI服务调用
- * 提供库存查询和配料查询接口，不经过JWT鉴权
+ * 提供库存查询和配料查询接口；不经过用户JWT鉴权，
+ * 由 InternalTokenInterceptor 校验服务间内部 token（配置后强制，未配置放行便于本地联调）
  */
 @RestController
 @RequestMapping("/api/proxy/dish")

@@ -1,14 +1,15 @@
 package com.smartkitchen.service;
 
 import com.smartkitchen.dto.KnowledgeUploadDTO;
-import com.smartkitchen.dto.PredictConfirmDTO;
 import com.smartkitchen.dto.PredictTriggerDTO;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 
 /**
- * Python AI 服务代理接口
+ * Python AI 服务代理接口。
+ * 注意：预测结果的查询与人工确认已收归 Java 直查/直写 MySQL（见 PredictionService），
+ * 此处仅保留进度仍在 Python/Redis 的 trigger/status 及知识库相关代理。
  */
 public interface PythonAIService {
 
@@ -20,25 +21,11 @@ public interface PythonAIService {
     Map<String, Object> triggerPrediction(PredictTriggerDTO dto);
 
     /**
-     * 查询预测结果
-     * @param targetDate 预测日期
-     * @return Python返回结果
-     */
-    Map<String, Object> getPredictionResult(String targetDate);
-
-    /**
-     * 查询预测任务状态
+     * 查询预测任务状态（进度存于 Python 侧 Redis predict:task:*）
      * @param taskId 任务ID
      * @return Python返回结果
      */
     Map<String, Object> getPredictionStatus(String taskId);
-
-    /**
-     * 确认预测量
-     * @param dto 确认参数
-     * @return Python返回结果
-     */
-    Map<String, Object> confirmPrediction(PredictConfirmDTO dto);
 
     /**
      * 上传知识库文档（代理调用 Python /ai/knowledge/process）

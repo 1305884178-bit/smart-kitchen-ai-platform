@@ -2,11 +2,13 @@ import json
 import os
 import logging
 import re
+import requests
 from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
 from app.config import settings
 from app.tools.predict_tools import get_sales_30d, get_recent_reviews
+from app.utils.auth import internal_auth_headers
 from app.utils.mcp_client import call_mcp_tool
 from app.db.mysql_client import get_db_connection
 
@@ -302,52 +304,37 @@ async def llm_adjust_node(state: PredictState) -> PredictState:
 
 
 async def save_result_node(state: PredictState) -> PredictState:
-    """保存预测结果到数据库"""
-    conn = get_db_connection()
+    """
+    保存预测结果：改为 HTTP 调 Java 内部接口 POST /api/proxy/predict/upsert 落库。
+    ai_prediction_record 的写入口统一在 Java（MySQL 业务写归 Java），
+    Python 禁止再对该表执行 INSERT/UPDATE；请求带服务间内部 token（配置时）。
+    """
+    payload = {
+        "predict_date": state['predict_date'],
+        "dish_id": state['dish_id'],
+        "base_quantity": state.get('base_quantity'),
+        "ai_suggest_quantity": state.get('ai_suggest_quantity'),
+        "final_quantity": state.get('final_quantity'),
+        "reasoning": state.get('reasoning'),
+        "confidence": state.get('confidence'),
+        "recent_avg_score": state.get('recent_avg_score'),
+    }
     try:
-        with conn.cursor() as cursor:
-            check_sql = "SELECT id FROM ai_prediction_record WHERE predict_date = %s AND dish_id = %s"
-            cursor.execute(check_sql, (state['predict_date'], state['dish_id']))
-            exist = cursor.fetchone()
-
-            if exist:
-                update_sql = """
-                    UPDATE ai_prediction_record
-                    SET base_quantity = %s, ai_suggest_quantity = %s, final_quantity = %s,
-                        reasoning = %s, confidence = %s, recent_avg_score = %s
-                    WHERE id = %s
-                """
-                cursor.execute(update_sql, (
-                    state.get('base_quantity'),
-                    state.get('ai_suggest_quantity'),
-                    state.get('final_quantity'),
-                    state.get('reasoning'),
-                    state.get('confidence'),
-                    state.get('recent_avg_score'),
-                    exist['id']
-                ))
-            else:
-                insert_sql = """
-                    INSERT INTO ai_prediction_record
-                    (predict_date, dish_id, base_quantity, ai_suggest_quantity, final_quantity, reasoning, confidence, recent_avg_score, status)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0)
-                """
-                cursor.execute(insert_sql, (
-                    state['predict_date'],
-                    state['dish_id'],
-                    state.get('base_quantity'),
-                    state.get('ai_suggest_quantity'),
-                    state.get('final_quantity'),
-                    state.get('reasoning'),
-                    state.get('confidence'),
-                    state.get('recent_avg_score')
-                ))
-        conn.commit()
+        resp = requests.post(
+            f"{settings.java_api_url}/api/proxy/predict/upsert",
+            json=payload,
+            headers=internal_auth_headers(),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 200:
+            logger.error(
+                f"Java upsert 预测结果失败（dish {state['dish_id']}）：{data.get('message')}"
+            )
     except Exception as e:
-        conn.rollback()
-        logger.error(f"Error saving prediction result: {e}")
-    finally:
-        conn.close()
+        # 落库失败只打日志，不中断预测工作流（其余菜品继续）
+        logger.error(f"Error saving prediction result via Java upsert: {e}")
     # 只落库、不修改状态：返回空字典，避免与 llm_adjust 节点写同一键导致 LangGraph 并发更新冲突
     return {}
 

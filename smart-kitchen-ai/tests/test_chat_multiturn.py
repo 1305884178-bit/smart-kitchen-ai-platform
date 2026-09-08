@@ -236,9 +236,15 @@ def client():
 
 @pytest.fixture(autouse=True)
 def clear_rate_buckets():
+    """限流现已走 Redis（INCR+TTL）：测试内统一打断 Redis 强制走内存兜底窗口，保证离线可重复"""
     from app.utils import auth
     auth._rate_buckets.clear()
-    yield
+    broken = MagicMock()
+    broken.exists.return_value = 0
+    broken.get.return_value = None
+    broken.incr.side_effect = ConnectionError("redis down in tests")
+    with patch.object(auth, "redis_client", broken):
+        yield
     auth._rate_buckets.clear()
 
 

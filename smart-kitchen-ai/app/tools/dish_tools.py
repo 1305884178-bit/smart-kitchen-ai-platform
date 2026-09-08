@@ -2,6 +2,7 @@ import requests
 from langchain_core.tools import tool
 from app.services.rag_service import search_knowledge
 from app.services.retrieval_context import current_retrieval_query
+from app.utils.auth import internal_auth_headers
 from app.config import settings
 import json
 
@@ -42,6 +43,7 @@ def check_dish_inventory(dish_name: str) -> str:
         resp = requests.get(
             f"{settings.java_api_url}/api/proxy/dish/inventory",
             params={"dishName": dish_name},
+            headers=internal_auth_headers(),
             timeout=5
         )
         resp.raise_for_status()
@@ -90,6 +92,7 @@ def get_dish_ingredients(dish_name: str) -> str:
         resp = requests.get(
             f"{settings.java_api_url}/api/proxy/dish/ingredients",
             params={"dishName": dish_name},
+            headers=internal_auth_headers(),
             timeout=5
         )
         resp.raise_for_status()

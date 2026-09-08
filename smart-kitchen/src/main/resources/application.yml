@@ -69,6 +69,9 @@ smart-kitchen:
     refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000} # Refresh Token 7 days
   python-service:
     url: ${PYTHON_API_URL:http://localhost:8000}
+    # 服务间内部 token：与 Python 侧 AI_INTERNAL_TOKEN 配对；
+    # 配置后 Java→Python 请求统一带 Bearer，且 /api/proxy/** 强制校验该 token；留空不校验便于本地联调
+    internal-token: ${AI_INTERNAL_TOKEN:}
   wechat:
     app-id: ${WX_APP_ID:}
     app-secret: ${WX_APP_SECRET:}

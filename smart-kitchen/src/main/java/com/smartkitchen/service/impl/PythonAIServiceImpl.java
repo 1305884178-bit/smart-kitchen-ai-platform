@@ -1,7 +1,6 @@
 package com.smartkitchen.service.impl;
 
 import com.smartkitchen.dto.KnowledgeUploadDTO;
-import com.smartkitchen.dto.PredictConfirmDTO;
 import com.smartkitchen.dto.PredictTriggerDTO;
 import com.smartkitchen.service.PythonAIService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,7 +23,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Python AI 服务代理实现，封装对 Python FastAPI 的 RestTemplate 调用
+ * Python AI 服务代理实现，封装对 Python FastAPI 的 RestTemplate 调用。
+ * 所有出站请求统一经 {@link #authHeaders()} 携带服务间内部 Bearer token
+ * （与 Python 侧 AI_INTERNAL_TOKEN 配对）；token 未配置时不带头，保持本地联调可用。
  */
 @Service
 public class PythonAIServiceImpl implements PythonAIService {
@@ -39,12 +40,22 @@ public class PythonAIServiceImpl implements PythonAIService {
     @Value("${smart-kitchen.python-service.internal-token:}")
     private String internalToken;
 
-    private HttpEntity<Map<String, Object>> jsonEntity(Map<String, Object> body) {
+    /** 统一构造带内部 token 的请求头；token 为空时不带头（本地联调） */
+    private HttpHeaders authHeaders() {
         HttpHeaders headers = new HttpHeaders();
         if (internalToken != null && !internalToken.isEmpty()) {
             headers.setBearerAuth(internalToken);
         }
-        return new HttpEntity<>(body, headers);
+        return headers;
+    }
+
+    private HttpEntity<Map<String, Object>> jsonEntity(Map<String, Object> body) {
+        return new HttpEntity<>(body, authHeaders());
+    }
+
+    /** GET 请求同样走统一头，避免「一配 token 预测全 401」 */
+    private HttpEntity<Void> getEntity() {
+        return new HttpEntity<>(authHeaders());
     }
 
     /**
@@ -64,29 +75,14 @@ public class PythonAIServiceImpl implements PythonAIService {
         }
         ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
                 url, HttpMethod.POST,
-                new HttpEntity<>(requestBody),
+                jsonEntity(requestBody),
                 new ParameterizedTypeReference<Map<String, Object>>() {}
         );
         return response.getBody();
     }
 
     /**
-     * 查询备菜预测结果（代理调用 Python /ai/predict/result）
-     * @param targetDate 预测日期
-     * @return Python返回结果
-     */
-    @Override
-    public Map<String, Object> getPredictionResult(String targetDate) {
-        String url = pythonServiceUrl + "/ai/predict/result?target_date=" + targetDate;
-        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                url, HttpMethod.GET, null,
-                new ParameterizedTypeReference<Map<String, Object>>() {}
-        );
-        return response.getBody();
-    }
-
-    /**
-     * 查询预测任务状态（代理调用 Python /ai/predict/status）
+     * 查询预测任务状态（代理调用 Python /ai/predict/status，进度存于 Redis predict:task:*）
      * @param taskId 任务ID
      * @return Python返回结果
      */
@@ -94,27 +90,7 @@ public class PythonAIServiceImpl implements PythonAIService {
     public Map<String, Object> getPredictionStatus(String taskId) {
         String url = pythonServiceUrl + "/ai/predict/status?task_id=" + taskId;
         ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                url, HttpMethod.GET, null,
-                new ParameterizedTypeReference<Map<String, Object>>() {}
-        );
-        return response.getBody();
-    }
-
-    /**
-     * 确认/覆盖预测量（代理调用 Python /ai/predict/confirm）
-     * @param dto 包含recordId、finalQuantity、confirmedBy
-     * @return Python返回结果
-     */
-    @Override
-    public Map<String, Object> confirmPrediction(PredictConfirmDTO dto) {
-        String url = pythonServiceUrl + "/ai/predict/confirm";
-        Map<String, Object> requestBody = new HashMap<>();
-        requestBody.put("record_id", dto.getRecordId());
-        requestBody.put("final_quantity", dto.getFinalQuantity());
-        requestBody.put("confirmed_by", dto.getConfirmedBy());
-        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
-                url, HttpMethod.POST,
-                new HttpEntity<>(requestBody),
+                url, HttpMethod.GET, getEntity(),
                 new ParameterizedTypeReference<Map<String, Object>>() {}
         );
         return response.getBody();
@@ -175,11 +151,8 @@ public class PythonAIServiceImpl implements PythonAIService {
     @Override
     public String ocrFile(MultipartFile file) {
         String url = pythonServiceUrl + "/ai/knowledge/ocr";
-        HttpHeaders headers = new HttpHeaders();
+        HttpHeaders headers = authHeaders();
         headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-        if (internalToken != null && !internalToken.isEmpty()) {
-            headers.setBearerAuth(internalToken);
-        }
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         try {
             ByteArrayResource resource = new ByteArrayResource(file.getBytes()) {

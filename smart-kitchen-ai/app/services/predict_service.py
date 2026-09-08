@@ -9,6 +9,10 @@ from app.db.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
+# 数据归属约定：ai_prediction_record 的 INSERT/UPDATE 全部在 Java
+# （内部接口 /api/proxy/predict/upsert 与人工确认 /api/admin/predict/confirm）。
+# Python 侧对该表只读（get_prediction_results）；任务进度仍由 Python 写 Redis predict:task:*。
+
 TASK_KEY_PREFIX = "predict:task:"
 TASK_TTL_SECONDS = 3600
 
@@ -109,7 +113,7 @@ async def trigger_prediction(target_date: Optional[str] = None, dish_id: Optiona
     }
 
 def get_prediction_results(target_date: str) -> List[Dict]:
-    """获取预测结果"""
+    """获取预测结果（只读；管理台查询已改由 Java 直查，本函数仅供 Python 内部/调试用）"""
     conn = get_db_connection()
     results = []
     try:
@@ -144,28 +148,3 @@ def get_prediction_results(target_date: str) -> List[Dict]:
     finally:
         conn.close()
     return results
-
-def confirm_prediction(record_id: int, final_quantity: int, confirmed_by: int) -> bool:
-    """确认/覆盖预测结果（幂等：重复确认相同值也视为成功）"""
-    conn = get_db_connection()
-    success = False
-    try:
-        with conn.cursor() as cursor:
-            # 先确认记录存在；UPDATE 值未变化时 rowcount 为 0，不能据此判定失败
-            cursor.execute("SELECT id FROM ai_prediction_record WHERE id = %s", (record_id,))
-            if not cursor.fetchone():
-                return False
-            sql = """
-                UPDATE ai_prediction_record
-                SET final_quantity = %s, status = 1, confirmed_by = %s
-                WHERE id = %s
-            """
-            cursor.execute(sql, (final_quantity, confirmed_by, record_id))
-            success = True
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        logger.error(f"Error confirming prediction: {e}")
-    finally:
-        conn.close()
-    return success
