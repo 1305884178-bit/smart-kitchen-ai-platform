@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from app.agents.predict_agent import predict_subgraph
 from app.db.mysql_client import get_db_connection
 from app.db.redis_client import redis_client
+from app.utils.mcp_client import call_mcp_tool
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 TASK_KEY_PREFIX = "predict:task:"
 TASK_TTL_SECONDS = 3600
+# 限制同一批任务中同时运行的菜品图数量，保护 LLM 与外部依赖。
+PREDICTION_CONCURRENCY = 5
 
 
 def _set_task_status(task_id: str, status: Dict) -> None:
@@ -34,6 +37,25 @@ def get_task_status(task_id: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"Error getting task status: {e}")
     return None
+
+
+async def _fetch_shared_context(target_date: str) -> Dict[str, Dict]:
+    """
+    天气/节假日只与 predict_date 有关、与菜品无关：整个预测任务只拉取一次，
+    注入每道菜的初始 state（图中对应节点检测到已注入会短路，不再重复调外部 API）。
+    失败时注入空 dict（等价于该维度缺失，Prompt 中按缺失处理），不阻塞任务。
+    """
+    try:
+        weather = await call_mcp_tool("weather_server", "get_tomorrow_weather", {"date": target_date})
+    except Exception as e:
+        logger.error(f"fetch shared weather failed: {e}")
+        weather = {}
+    try:
+        holiday = await call_mcp_tool("holiday_server", "get_holiday_info", {"date": target_date})
+    except Exception as e:
+        logger.error(f"fetch shared holiday failed: {e}")
+        holiday = {}
+    return {"weather": weather, "holiday": holiday}
 
 
 async def trigger_prediction(target_date: Optional[str] = None, dish_id: Optional[int] = None, task_id: Optional[str] = None) -> Dict:
@@ -68,17 +90,23 @@ async def trigger_prediction(target_date: Optional[str] = None, dish_id: Optiona
     if task_id:
         _set_task_status(task_id, {"status": "running", "total": total, "done": 0, "message": f"正在预测 {total} 道菜品..."})
 
+    # 天气/节假日与菜品无关，整个任务只拉取一次，注入每道菜的初始 state
+    shared_context = await _fetch_shared_context(target_date)
     done_count = 0
+    # 一个共享信号量管理整批菜品；每道菜各自创建信号量无法起到限流作用。
+    prediction_semaphore = asyncio.Semaphore(PREDICTION_CONCURRENCY)
 
     async def run_one(d_id: int):
         """执行单道菜品预测并在完成后推进进度"""
         nonlocal done_count
         try:
-            state = {
-                "predict_date": target_date,
-                "dish_id": d_id
-            }
-            return await predict_subgraph.ainvoke(state)
+            async with prediction_semaphore:
+                state = {
+                    "predict_date": target_date,
+                    "dish_id": d_id,
+                    **shared_context,
+                }
+                return await predict_subgraph.ainvoke(state)
         finally:
             done_count += 1
             if task_id:

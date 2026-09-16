@@ -11,8 +11,12 @@ __pycache__/
 # 个人面试笔记，不上传（与 PRD 同级，仅本地复习）
 面试前需要考虑的问题.md
 *面试题.md
+语义缓存面试深挖.md
 RAG面试题.md
 架构和边界和技术选型面试题.md
+Agent与FunctionCalling与ReAct面试题.md
+AI应用开发实习-项目面试图与问答.md
+LangGraph备菜预测面试题.md
 
 # Python 依赖安装目录（本地构建产物）
 smart-kitchen-ai/.deps/

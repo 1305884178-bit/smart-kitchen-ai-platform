@@ -646,20 +646,21 @@ START ─┬─→ get_sales_30d ──→ time_series_predict ─┐
 
 | 节点 | 实现 |
 |------|------|
-| `get_sales_30d` | PyMySQL 汇总 `oms_order_detail` 近 30 天日销量 |
-| `get_tomorrow_weather` | OpenWeatherMap `/data/2.5/forecast`（5 日/3 小时间隔），按目标日期过滤聚合为日级（城市由 `WEATHER_CITY` 配置） |
-| `get_holiday_info` | ModelScope MCP 服务，标准 JSON-RPC：`initialize`（取 `Mcp-Session-Id`）→ `tools/call`（工具 `holiday_info`） |
+| `get_sales_30d` | PyMySQL 汇总 `oms_order_detail` 日销量，营业日口径：窗口 `[CURDATE()-30, CURDATE())`（锚昨天、不含未完结的今天）；当天全店任一菜品有明细即营业日，营业但该菜未售出记 0、未营业日剔除；菜品上架日（`pms_dish.create_time`）前剔除；仅保留与预测日同类型（周末/工作日）的日期；窗口内从未售出返回空走冷启动 |
+| `get_tomorrow_weather` | OpenWeatherMap `/data/2.5/forecast`（5 日/3 小时间隔），按目标日期过滤聚合为日级（城市由 `WEATHER_CITY` 配置）；与菜品无关，由编排层按任务拉取一次注入 state，节点检测已注入则短路 |
+| `get_holiday_info` | ModelScope MCP 服务，标准 JSON-RPC：`initialize`（取 `Mcp-Session-Id`）→ `tools/call`（工具 `holiday_info`）；同样由编排层一次拉取注入 |
 | `get_recent_reviews` | PyMySQL 查近 10 条评价及均分 |
-| `time_series_predict` | 30 天均值/中位数/近 7 日均值 → 基础量；数据不足走冷启动降级（见下） |
+| `time_series_predict` | 同类型营业日均值/中位数/近 7 个同类型日均值 → 基础量；数据不足走冷启动降级（见下） |
 | `llm_adjust` | 外置 Prompt（`app/prompts/predict_llm_prompt.txt`）+ 四维数据 → LLM → JSON；60s 超时/异常 → 回退时序结果（confidence=0.5，reasoning 注明降级） |
 | `save_result` | upsert `ai_prediction_record`（按 `uk_date_dish` 唯一键） |
 
-**冷启动降级链**：≥7 天销量（30 天统计）→ <7 天（近 N 天均值）→ 同分类菜品 30 天日均 → `new_product_initial_stock` → `daily_stock` → 兜底常量 20。Prompt 中将当前降级级别告知 LLM，由其在该基准上叠加修正。
+**冷启动降级链**：≥7 个同类型营业日（统计均值）→ <7 天（近 N 天均值）→ 同分类菜品 30 天日均 → `new_product_initial_stock` → `daily_stock` → 兜底常量 20。Prompt 中将当前降级级别告知 LLM，由其在该基准上叠加修正。
 
 **触发**：
 
 - 定时：APScheduler Cron 每日 02:00（FastAPI lifespan 启停）。
 - 手动：`POST /ai/predict/trigger` → BackgroundTasks 异步执行，返回 `task_id`；进度写 Redis（`predict:task:{task_id}`，TTL 1h），前端每 3s 轮询 `/ai/predict/status`。
+- 天气/节假日为任务级共享数据：每次任务（定时或手动）仅调用一次外部 API，注入各菜品子图初始 state，节点幂等短路；失败注入空 dict，维度按缺失处理。
 
 ### 8.7 AI 客服（ReAct Agent）
 

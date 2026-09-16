@@ -1,11 +1,11 @@
-import json
 import os
 import logging
 import re
-import requests
+import httpx
 from typing import TypedDict, Optional, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 from app.config import settings
 from app.tools.predict_tools import get_sales_30d, get_recent_reviews
 from app.utils.auth import internal_auth_headers
@@ -47,10 +47,18 @@ class PredictState(TypedDict):
     error: Optional[str]
 
 
+class PredictionAdjustment(BaseModel):
+    """LLM 对时序基准量的结构化修正结果。"""
+
+    suggest_quantity: int = Field(ge=0, description="建议备菜份数，必须为非负整数")
+    reasoning: str = Field(min_length=1, description="建议量的业务依据")
+    confidence: float = Field(ge=0, le=1, description="预测置信度，范围 0 到 1")
+
+
 async def get_sales_30d_node(state: PredictState) -> PredictState:
-    """获取过去30天销量数据"""
+    """获取历史日销量（营业日口径，按预测日周末/工作日过滤，窗口为昨天往前30天）"""
     try:
-        sales = get_sales_30d(state['dish_id'])
+        sales = get_sales_30d(state['dish_id'], state['predict_date'])
         return {"sales_30d": sales}
     except Exception as e:
         logger.error(f"Error in get_sales_30d: {e}")
@@ -58,7 +66,9 @@ async def get_sales_30d_node(state: PredictState) -> PredictState:
 
 
 async def get_tomorrow_weather_node(state: PredictState) -> PredictState:
-    """获取明天天气（MCP调用）"""
+    """获取目标日天气（MCP调用）。编排层已按任务维度注入时直接复用，避免每道菜重复调外部 API"""
+    if state.get("weather"):
+        return {}
     try:
         weather = await call_mcp_tool("weather_server", "get_tomorrow_weather", {"date": state['predict_date']})
         return {"weather": weather}
@@ -68,7 +78,9 @@ async def get_tomorrow_weather_node(state: PredictState) -> PredictState:
 
 
 async def get_holiday_info_node(state: PredictState) -> PredictState:
-    """获取节假日信息（MCP调用）"""
+    """获取节假日信息（MCP调用）。编排层已按任务维度注入时直接复用，避免每道菜重复调外部 API"""
+    if state.get("holiday"):
+        return {}
     try:
         holiday = await call_mcp_tool("holiday_server", "get_holiday_info", {"date": state['predict_date']})
         return {"holiday": holiday}
@@ -269,32 +281,31 @@ async def llm_adjust_node(state: PredictState) -> PredictState:
             recent_avg_score=state.get('recent_avg_score')
         )
 
-        response = await llm.ainvoke(prompt)
-        content = response.content.strip()
-        if content.startswith("```json"):
-            content = content[7:-3].strip()
-        elif content.startswith("```"):
-            content = content[3:-3].strip()
+        # 通过工具调用传递 Pydantic schema。模型输出会先经 schema 校验，
+        # 不再依赖 Prompt 要求或手写 json.loads；校验/调用失败统一走下方降级。
+        structured_llm = llm.with_structured_output(
+            PredictionAdjustment,
+            method="function_calling",
+        )
+        result: PredictionAdjustment = await structured_llm.ainvoke(prompt)
 
-        result = json.loads(content)
-
-        suggest_quantity = result.get("suggest_quantity", time_series_val)
-        if suggest_quantity is not None:
-            # 归一化为整数，保证与落库的 int 字段及推理说明中的数值一致
-            suggest_quantity = int(suggest_quantity)
+        suggest_quantity = result.suggest_quantity
         reasoning = _ensure_consistent_reasoning(
-            result.get("reasoning", "LLM adjustment"), suggest_quantity
+            result.reasoning, suggest_quantity
         )
 
         return {
             "ai_suggest_quantity": suggest_quantity,
             "reasoning": reasoning,
-            "confidence": result.get("confidence", 0.8),
+            "confidence": result.confidence,
             "final_quantity": suggest_quantity
         }
     except Exception as e:
         logger.error(f"LLM adjustment failed, degrading to time series. Error: {e}")
-        fallback_ts = state.get('time_series_result', 0)
+        # 冷启动时 time_series_result 为 None，真正可用的降级结果在 base_quantity。
+        fallback_ts = state.get('base_quantity')
+        if fallback_ts is None:
+            fallback_ts = state.get('time_series_result', 0)
         return {
             "ai_suggest_quantity": fallback_ts,
             "reasoning": "LLM failed or timeout, fallback to time series.",
@@ -320,14 +331,14 @@ async def save_result_node(state: PredictState) -> PredictState:
         "recent_avg_score": state.get('recent_avg_score'),
     }
     try:
-        resp = requests.post(
-            f"{settings.java_api_url}/api/proxy/predict/upsert",
-            json=payload,
-            headers=internal_auth_headers(),
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{settings.java_api_url}/api/proxy/predict/upsert",
+                json=payload,
+                headers=internal_auth_headers(),
+            )
+            resp.raise_for_status()
+            data = resp.json()
         if data.get("code") != 200:
             logger.error(
                 f"Java upsert 预测结果失败（dish {state['dish_id']}）：{data.get('message')}"
@@ -335,7 +346,7 @@ async def save_result_node(state: PredictState) -> PredictState:
     except Exception as e:
         # 落库失败只打日志，不中断预测工作流（其余菜品继续）
         logger.error(f"Error saving prediction result via Java upsert: {e}")
-    # 只落库、不修改状态：返回空字典，避免与 llm_adjust 节点写同一键导致 LangGraph 并发更新冲突
+    # 只产生落库副作用、不修改图状态。
     return {}
 
 
