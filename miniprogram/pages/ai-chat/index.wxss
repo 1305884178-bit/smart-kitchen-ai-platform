@@ -100,3 +100,7 @@
 .send-btn::after {
   border: none;
 }
+
+.stop-btn {
+  background: #8c8c8c;
+}

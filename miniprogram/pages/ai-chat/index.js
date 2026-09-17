@@ -26,6 +26,14 @@ Page({
     }
   },
 
+  onHide() {
+    this._stopCurrentResponse();
+  },
+
+  onUnload() {
+    this._stopCurrentResponse(true);
+  },
+
   /**
    * 本地生成/复用会话 ID（不上 Redis session，仅用于服务端日志与限流兜底）
    */
@@ -74,6 +82,7 @@ Page({
     this.setData({ messages });
 
     let fullContent = '';
+    const requestId = `chat_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
     // 多轮上下文：本地最近 N 条真实消息（过滤掉正在流式输出的空占位消息）
     const historyMessages = messages
@@ -88,8 +97,11 @@ Page({
       data: {
         message: question,
         conversation_id: this.conversationId,
+        request_id: requestId,
         messages: historyMessages
       },
+      cancelUrl: '/ai/chat/cancel',
+      requestId,
       onMessage: (chunk) => {
         let content = chunk;
         try {
@@ -130,6 +142,20 @@ Page({
         this._sse = null;
       }
     });
+  },
+
+  /** 用户点击停止、切后台或离开页面时结束当前流式回答。 */
+  _stopCurrentResponse(silent = false) {
+    if (!this._sse) return;
+    this._sse.abort();
+    this._sse = null;
+    if (!silent) {
+      this.setData({ sending: false, aiTyping: false });
+    }
+  },
+
+  onStop() {
+    this._stopCurrentResponse();
   },
 
   /**

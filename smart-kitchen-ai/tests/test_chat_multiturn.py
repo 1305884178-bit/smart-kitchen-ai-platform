@@ -88,7 +88,7 @@ class TestRetrievalUsesRewrittenQuery:
         with patch("app.tools.dish_tools.search_knowledge", return_value=[]) as mock_search:
             token = current_retrieval_query.set("水煮鱼辣不辣")
             try:
-                search_dish_by_preference.invoke({"query": "这个辣不辣"})
+                asyncio.run(search_dish_by_preference.ainvoke({"query": "这个辣不辣"}))
             finally:
                 current_retrieval_query.reset(token)
 
@@ -101,7 +101,7 @@ class TestRetrievalUsesRewrittenQuery:
         token = current_retrieval_query.set(None)
         try:
             with patch("app.tools.dish_tools.search_knowledge", return_value=[]) as mock_search:
-                search_dish_by_preference.invoke({"query": "黑叉烧甜吗"})
+                asyncio.run(search_dish_by_preference.ainvoke({"query": "黑叉烧甜吗"}))
         finally:
             current_retrieval_query.reset(token)
 
@@ -112,7 +112,7 @@ class TestRetrievalUsesRewrittenQuery:
 
         results = [{"text": "麻辣鲜香", "document_id": "42", "chunk_index": 1, "title": "水煮鱼"}]
         with patch("app.tools.dish_tools.search_knowledge", return_value=results):
-            output = search_dish_by_preference.invoke({"query": "水煮鱼辣不辣"})
+            output = asyncio.run(search_dish_by_preference.ainvoke({"query": "水煮鱼辣不辣"}))
 
         # 间接注入防护：资料包在明确标记中；溯源字段保留
         assert "<knowledge>" in output
@@ -124,7 +124,7 @@ class TestRetrievalUsesRewrittenQuery:
 # ---------- 语义缓存 key 用改写句 ----------
 
 def _fake_agent_events(text="辣，很下饭。"):
-    async def stream(messages, version):
+    async def stream(messages, version, **kwargs):
         yield {"event": "on_chat_model_stream",
                "data": {"chunk": SimpleNamespace(content=text)}}
     return stream
@@ -175,7 +175,7 @@ class TestSemanticCacheKey:
         mock_cache = MagicMock()
         mock_cache.lookup.return_value = (None, [0.1] * 1024)
 
-        async def stream(messages, version):
+        async def stream(messages, version, **kwargs):
             yield {"event": "on_tool_start", "name": "check_dish_inventory", "data": {}}
             yield {"event": "on_chat_model_stream",
                    "data": {"chunk": SimpleNamespace(content="今日还剩 8 份")}}
@@ -190,6 +190,34 @@ class TestSemanticCacheKey:
             run_async_gen(gen)
 
         # 库存类动态回答不写语义缓存
+        mock_cache.store.assert_not_called()
+
+    def test_agent_receives_request_id_in_runtime_config(self):
+        mock_cache = MagicMock()
+        mock_cache.lookup.return_value = (None, [0.1] * 1024)
+        mock_agent = MagicMock()
+        mock_agent.astream_events = _fake_agent_events()
+
+        with patch("app.services.llm_service.semantic_cache", mock_cache), \
+             patch("app.services.llm_service.cs_agent", mock_agent):
+            run_async_gen(ChatService.get_chat_response_generator("招牌菜", request_id="chat-test"))
+
+        assert mock_agent.astream_events.call_args.kwargs["config"] == {
+            "configurable": {"request_id": "chat-test"}
+        }
+
+    def test_cancelled_stream_does_not_emit_done_or_write_cache(self):
+        mock_cache = MagicMock()
+        mock_cache.lookup.return_value = (None, [0.1] * 1024)
+        mock_agent = MagicMock()
+        mock_agent.astream_events = _fake_agent_events()
+
+        with patch("app.services.llm_service.semantic_cache", mock_cache), \
+             patch("app.services.llm_service.cs_agent", mock_agent), \
+             patch("app.services.llm_service.is_cancelled", return_value=True):
+            chunks = run_async_gen(ChatService.get_chat_response_generator("招牌菜", request_id="chat-test"))
+
+        assert chunks == []
         mock_cache.store.assert_not_called()
 
 

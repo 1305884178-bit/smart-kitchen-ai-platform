@@ -35,8 +35,7 @@
       bindconfirm="onSend"
       disabled="{{sending}}"
     />
-    <button class="send-btn {{sending || !inputValue ? 'btn-disabled' : ''}}" bindtap="onSend" disabled="{{sending || !inputValue}}">
-      发送
-    </button>
+    <button wx:if="{{sending}}" class="send-btn stop-btn" bindtap="onStop">停止</button>
+    <button wx:else class="send-btn {{!inputValue ? 'btn-disabled' : ''}}" bindtap="onSend" disabled="{{!inputValue}}">发送</button>
   </view>
 </view>

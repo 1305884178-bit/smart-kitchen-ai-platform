@@ -45,6 +45,8 @@ function _compareVersion(v1, v2) {
  * @param {function} config.onComplete - 流结束回调
  * @param {function(Error)} config.onError - 错误回调
  * @param {object} config.header - 额外请求头
+ * @param {string} config.cancelUrl - 取消接口路径
+ * @param {string} config.requestId - 当前流式请求 ID
  * @returns {{ abort: function }} 返回可调用 abort 取消请求的对象
  */
 function createSSE(config) {
@@ -116,7 +118,7 @@ function createSSE(config) {
     });
   } else {
     // 降级：普通 POST 请求，等待完整响应
-    wx.request({
+    requestTask = wx.request({
       url: `${baseUrl}${config.url}`,
       method: 'POST',
       data: config.data || {},
@@ -140,7 +142,18 @@ function createSSE(config) {
 
   return {
     abort() {
+      if (aborted) return;
       aborted = true;
+      // 先通知服务端写入 Redis 取消标记；即使该请求发不出去，服务端也会
+      // 通过原 SSE 连接断开来检测。
+      if (config.cancelUrl && config.requestId) {
+        wx.request({
+          url: `${baseUrl}${config.cancelUrl}`,
+          method: 'POST',
+          data: { request_id: config.requestId },
+          header: headers
+        });
+      }
       if (requestTask) {
         requestTask.abort();
       }

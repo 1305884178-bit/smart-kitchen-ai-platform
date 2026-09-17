@@ -4,6 +4,7 @@ dish_tools 调 Java /api/proxy/** 的内部 token 头测试（HTTP 全 mock，�
 约定：配置 AI_INTERNAL_TOKEN 后 check_dish_inventory / get_dish_ingredients
 必须携带 Authorization: Bearer <token>；未配置时不带头（本地联调）。
 """
+import asyncio
 from unittest.mock import MagicMock, patch
 
 from app.config import settings
@@ -17,44 +18,49 @@ def _ok_response(data):
     return resp
 
 
+class _FakeAsyncClient:
+    def __init__(self, response):
+        self.response = response
+        self.get_calls = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def get(self, *args, **kwargs):
+        self.get_calls.append((args, kwargs))
+        return self.response
+
+
+def _invoke(tool, payload):
+    return asyncio.run(tool.ainvoke(payload))
+
+
 class TestInternalTokenHeader:
     def test_inventory_sends_bearer_when_token_configured(self):
-        mock_requests = MagicMock()
-        mock_requests.get.return_value = _ok_response(
-            {"name": "水煮鱼", "dailyStock": 8, "status": 1}
-        )
-        mock_requests.exceptions = dish_tools.requests.exceptions
-        with patch.object(dish_tools, "requests", mock_requests), \
+        fake_client = _FakeAsyncClient(_ok_response({"name": "水煮鱼", "dailyStock": 8, "status": 1}))
+        with patch.object(dish_tools.httpx, "AsyncClient", return_value=fake_client), \
              patch.object(settings, "ai_internal_token", "internal-test-token"):
-            out = dish_tools.check_dish_inventory.invoke({"dish_name": "水煮鱼"})
+            out = _invoke(dish_tools.check_dish_inventory, {"dish_name": "水煮鱼"})
 
         assert "库存为 8 份" in out
-        _, kwargs = mock_requests.get.call_args
-        assert kwargs["headers"]["Authorization"] == "Bearer internal-test-token"
+        assert fake_client.get_calls[0][1]["headers"]["Authorization"] == "Bearer internal-test-token"
 
     def test_ingredients_sends_bearer_when_token_configured(self):
-        mock_requests = MagicMock()
-        mock_requests.get.return_value = _ok_response(
-            {"name": "水煮鱼", "ingredients": '["草鱼"]', "allergens": '["鱼"]'}
-        )
-        mock_requests.exceptions = dish_tools.requests.exceptions
-        with patch.object(dish_tools, "requests", mock_requests), \
+        fake_client = _FakeAsyncClient(_ok_response({"name": "水煮鱼", "ingredients": '["草鱼"]', "allergens": '["鱼"]'}))
+        with patch.object(dish_tools.httpx, "AsyncClient", return_value=fake_client), \
              patch.object(settings, "ai_internal_token", "internal-test-token"):
-            out = dish_tools.get_dish_ingredients.invoke({"dish_name": "水煮鱼"})
+            out = _invoke(dish_tools.get_dish_ingredients, {"dish_name": "水煮鱼"})
 
         assert "草鱼" in out
-        _, kwargs = mock_requests.get.call_args
-        assert kwargs["headers"]["Authorization"] == "Bearer internal-test-token"
+        assert fake_client.get_calls[0][1]["headers"]["Authorization"] == "Bearer internal-test-token"
 
     def test_no_header_when_token_not_configured(self):
-        mock_requests = MagicMock()
-        mock_requests.get.return_value = _ok_response(
-            {"name": "水煮鱼", "dailyStock": 8, "status": 1}
-        )
-        mock_requests.exceptions = dish_tools.requests.exceptions
-        with patch.object(dish_tools, "requests", mock_requests), \
+        fake_client = _FakeAsyncClient(_ok_response({"name": "水煮鱼", "dailyStock": 8, "status": 1}))
+        with patch.object(dish_tools.httpx, "AsyncClient", return_value=fake_client), \
              patch.object(settings, "ai_internal_token", ""):
-            dish_tools.check_dish_inventory.invoke({"dish_name": "水煮鱼"})
+            _invoke(dish_tools.check_dish_inventory, {"dish_name": "水煮鱼"})
 
-        _, kwargs = mock_requests.get.call_args
-        assert "Authorization" not in kwargs["headers"]
+        assert "Authorization" not in fake_client.get_calls[0][1]["headers"]

@@ -56,6 +56,8 @@ class Settings:
     ai_internal_token = os.getenv("AI_INTERNAL_TOKEN", "")
     # 客服接口限流：每用户/每 IP 每分钟最大请求数
     chat_rate_limit_per_minute = int(os.getenv("CHAT_RATE_LIMIT_PER_MINUTE", "30"))
+    # 客服取消标记与所属用户的保存时间；正常回答通常会在此时间内结束。
+    chat_cancel_ttl_seconds = int(os.getenv("CHAT_CANCEL_TTL_SECONDS", "300"))
 
     weather_api_key = os.getenv("WEATHER_API_KEY", "")
     weather_city = os.getenv("WEATHER_CITY", "Shenzhen")

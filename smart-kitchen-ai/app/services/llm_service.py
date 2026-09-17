@@ -1,11 +1,13 @@
 import json
 import asyncio
+import contextlib
 import logging
 from app.agents.cs_agent import cs_agent
 from app.config import settings
 from app.services.semantic_cache_service import semantic_cache
 from app.services.query_rewrite import rewrite_query
 from app.services.retrieval_context import current_retrieval_query
+from app.services.chat_cancellation import is_cancelled
 from langchain_core.messages import HumanMessage, AIMessage
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,9 @@ class ChatService:
     async def generate_chat_stream(message: str, history: list[dict] | None = None,
                                    retrieval_query: str | None = None,
                                    question_vector: list[float] | None = None,
-                                   cache_question: str | None = None):
+                                   cache_question: str | None = None,
+                                   request_id: str | None = None,
+                                   cancel_event: asyncio.Event | None = None):
         # 用来收集完整回复以便缓存
         full_response = ""
         dynamic_tool_invoked = False
@@ -49,10 +53,51 @@ class ChatService:
         try:
             # 异步流式调用 Agent
             # 注意：astream_events v1 已被弃用，建议后续升至 v2，此处先维持功能不变
-            async for event in cs_agent.astream_events(
+            events = cs_agent.astream_events(
                 {"messages": agent_messages},
+                config={"configurable": {"request_id": request_id}},
                 version="v1"
-            ):
+            ).__aiter__()
+            while True:
+                if is_cancelled(request_id) or (cancel_event and cancel_event.is_set()):
+                    logger.info("[Chat] request cancelled: %s", request_id)
+                    return
+
+                event_task = asyncio.ensure_future(events.__anext__())
+                cancel_task = asyncio.create_task(cancel_event.wait()) if cancel_event else None
+                waiting = {event_task}
+                if cancel_task:
+                    waiting.add(cancel_task)
+                try:
+                    done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+                except BaseException:
+                    # SSE 客户端断开时 StreamingResponse 会取消本协程；同时取消正在
+                    # 等待的 Agent 事件，避免模型/HTTP 工具脱离客户端继续消耗资源。
+                    for task in waiting:
+                        task.cancel()
+                    for task in waiting:
+                        with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                            await task
+                    raise
+
+                if cancel_task and cancel_task in done:
+                    event_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await event_task
+                    return
+                if cancel_task:
+                    cancel_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await cancel_task
+                try:
+                    event = event_task.result()
+                except StopAsyncIteration:
+                    break
+
+                # 每个 Agent 事件边界检查。工具也会从 config 读取 request_id 再检查一次。
+                if is_cancelled(request_id) or (cancel_event and cancel_event.is_set()):
+                    logger.info("[Chat] request cancelled: %s", request_id)
+                    return
                 kind = event["event"]
                 if kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
@@ -68,24 +113,32 @@ class ChatService:
         # 只缓存非动态回答：纯知识问答与 RAG 推荐（search_dish_by_preference 查的是知识库，
         # 知识库更新会通过 kb_version 指纹使旧缓存失效）均可缓存；含实时工具结果的不缓存。
         # 缓存 key 一律使用改写后的完整问句（cache_question），禁止用含指代的用户原句。
-        if full_response and not dynamic_tool_invoked:
+        if (full_response and not dynamic_tool_invoked and not is_cancelled(request_id)
+                and not (cancel_event and cancel_event.is_set())):
             semantic_cache.store(cache_question or message, full_response, question_vector=question_vector)
 
-        yield "data: [DONE]\n\n"
+        if not is_cancelled(request_id) and not (cancel_event and cancel_event.is_set()):
+            yield "data: [DONE]\n\n"
 
     @staticmethod
-    async def generate_cached_stream(cached_response: str):
+    async def generate_cached_stream(cached_response: str, request_id: str | None = None,
+                                     cancel_event: asyncio.Event | None = None):
         # 如果有缓存，稍微切分一下模拟流式
         chunk_size = 10
         for i in range(0, len(cached_response), chunk_size):
+            if is_cancelled(request_id) or (cancel_event and cancel_event.is_set()):
+                return
             chunk = cached_response[i:i+chunk_size]
             yield f"data: {json.dumps({'content': chunk})}\n\n"
             await asyncio.sleep(0.01)
-        yield "data: [DONE]\n\n"
+        if not is_cancelled(request_id) and not (cancel_event and cancel_event.is_set()):
+            yield "data: [DONE]\n\n"
 
     @classmethod
     def get_chat_response_generator(cls, message: str, history: list[dict] | None = None,
-                                    conversation_id: str | None = None):
+                                    conversation_id: str | None = None,
+                                    request_id: str | None = None,
+                                    cancel_event: asyncio.Event | None = None):
         """
         核心业务逻辑：语义缓存命中则返回缓存流，否则调用大模型流。
 
@@ -103,7 +156,9 @@ class ChatService:
         cached_response, question_vector = semantic_cache.lookup(rewritten)
 
         if cached_response:
-            return cls.generate_cached_stream(cached_response)
+            return cls.generate_cached_stream(
+                cached_response, request_id=request_id, cancel_event=cancel_event
+            )
 
         return cls.generate_chat_stream(
             message,
@@ -111,4 +166,6 @@ class ChatService:
             retrieval_query=rewritten,
             question_vector=question_vector,
             cache_question=rewritten,
+            request_id=request_id,
+            cancel_event=cancel_event,
         )

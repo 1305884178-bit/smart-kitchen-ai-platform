@@ -1,21 +1,37 @@
-import requests
+import asyncio
+import httpx
 from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 from app.services.rag_service import search_knowledge
 from app.services.retrieval_context import current_retrieval_query
 from app.utils.auth import internal_auth_headers
 from app.config import settings
+from app.services.chat_cancellation import is_cancelled
 import json
 
 
+def _request_id(config: RunnableConfig | None) -> str | None:
+    return (config or {}).get("configurable", {}).get("request_id")
+
+
+def _cancelled(config: RunnableConfig | None) -> bool:
+    return is_cancelled(_request_id(config))
+
+
 @tool
-def search_dish_by_preference(query: str) -> str:
+async def search_dish_by_preference(query: str, config: RunnableConfig) -> str:
     """
     根据顾客的口味偏好或模糊描述推荐菜品。
     例如：顾客说"想吃点辣的"、"有没有清淡的汤"。
     """
     # 多轮场景优先使用改写后的检索问句（指代已补全为菜名）；单轮时与原 query 一致
     retrieval_query = current_retrieval_query.get() or query
-    results = search_knowledge(retrieval_query, top_k=3)
+    if _cancelled(config):
+        return "本次对话已取消。"
+    # Milvus 客户端为同步实现，放在线程中避免阻塞 FastAPI 事件循环。
+    results = await asyncio.to_thread(search_knowledge, retrieval_query, top_k=3)
+    if _cancelled(config):
+        return "本次对话已取消。"
     if not results:
         return "抱歉，没有找到符合您口味的菜品推荐。"
 
@@ -34,18 +50,23 @@ def search_dish_by_preference(query: str) -> str:
 
 
 @tool
-def check_dish_inventory(dish_name: str) -> str:
+async def check_dish_inventory(dish_name: str, config: RunnableConfig) -> str:
     """
     查询指定菜品的实时库存。
     必须传入准确的菜品名称。
     """
+    if _cancelled(config):
+        return "本次对话已取消。"
     try:
-        resp = requests.get(
-            f"{settings.java_api_url}/api/proxy/dish/inventory",
-            params={"dishName": dish_name},
-            headers=internal_auth_headers(),
-            timeout=5
-        )
+        timeout = httpx.Timeout(timeout=5, connect=1.5)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(
+                f"{settings.java_api_url}/api/proxy/dish/inventory",
+                params={"dishName": dish_name},
+                headers=internal_auth_headers(),
+            )
+        if _cancelled(config):
+            return "本次对话已取消。"
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 200:
@@ -56,9 +77,9 @@ def check_dish_inventory(dish_name: str) -> str:
         if result.get("status") == 0:
             return f"{result['name']} 目前已停售。"
         return f"{result['name']} 当前库存为 {result['dailyStock']} 份。"
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         return f"查询 {dish_name} 库存超时，请稍后再试。"
-    except requests.exceptions.ConnectionError:
+    except httpx.ConnectError:
         return "服务暂不可用，请稍后再试。"
     except Exception as e:
         return f"查询库存时发生错误：{str(e)}"
@@ -83,18 +104,23 @@ def _parse_json_list(value):
 
 
 @tool
-def get_dish_ingredients(dish_name: str) -> str:
+async def get_dish_ingredients(dish_name: str, config: RunnableConfig) -> str:
     """
     查询指定菜品的配料和过敏原信息。
     必须传入准确的菜品名称。
     """
+    if _cancelled(config):
+        return "本次对话已取消。"
     try:
-        resp = requests.get(
-            f"{settings.java_api_url}/api/proxy/dish/ingredients",
-            params={"dishName": dish_name},
-            headers=internal_auth_headers(),
-            timeout=5
-        )
+        timeout = httpx.Timeout(timeout=5, connect=1.5)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(
+                f"{settings.java_api_url}/api/proxy/dish/ingredients",
+                params={"dishName": dish_name},
+                headers=internal_auth_headers(),
+            )
+        if _cancelled(config):
+            return "本次对话已取消。"
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") != 200:
@@ -120,9 +146,9 @@ def get_dish_ingredients(dish_name: str) -> str:
         if not parts:
             return f"{name} 暂无详细配料信息。"
         return f"{name} 的配料信息：{'；'.join(parts)}"
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         return f"查询 {dish_name} 配料超时，请稍后再试。"
-    except requests.exceptions.ConnectionError:
+    except httpx.ConnectError:
         return "服务暂不可用，请稍后再试。"
     except Exception as e:
         return f"查询配料时发生错误：{str(e)}"
