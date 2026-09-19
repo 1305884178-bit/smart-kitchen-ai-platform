@@ -65,6 +65,38 @@ cd smart-kitchen-ai && .venv/bin/python -m pytest tests/test_dish_tools_auth.py 
 python3 tests/test_miniprogram.py
 ```
 
+## 小程序点餐与用餐闭环
+
+### 1. 微信小程序点单
+
+按分类浏览菜品、查看库存状态，并将菜品加入购物车后提交订单。
+
+![微信小程序点单](docs/images/miniprogram-ordering.png)
+
+### 2. 支付页面
+
+订单创建后显示 15 分钟支付倒计时，超时未支付将自动取消。
+
+![支付页面](docs/images/miniprogram-payment.png)
+
+### 3. 订单详情
+
+支付后可查看菜品明细，并在用餐期间进入加菜流程。
+
+![订单详情](docs/images/miniprogram-order-detail.png)
+
+### 4. 加菜确认
+
+从订单详情进入点单页，确认座位号后提交加菜；加菜金额需补付后才推送厨房。
+
+![加菜页面](docs/images/miniprogram-add-dish.png)
+
+### 5. 厨房出餐后
+
+全部菜品完成出餐后，订单显示“已上菜”，顾客可继续加菜或结束用餐。
+
+![已出餐订单详情](docs/images/miniprogram-served.png)
+
 ## 管理端界面展示
 
 ### 1. 管理端首页
