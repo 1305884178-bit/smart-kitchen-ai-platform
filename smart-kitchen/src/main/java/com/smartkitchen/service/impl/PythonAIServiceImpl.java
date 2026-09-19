@@ -17,10 +17,8 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.util.UriUtils;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -149,7 +147,9 @@ public class PythonAIServiceImpl implements PythonAIService {
     public String getKnowledgeContent(String documentId, String title) {
         String url = pythonServiceUrl + "/ai/knowledge/document/" + documentId;
         if (title != null && !title.isBlank()) {
-            url += "?title=" + UriUtils.encodeQueryParam(title, StandardCharsets.UTF_8);
+            // RestTemplate 会对 String URL 的查询参数统一编码；此处不要提前编码，
+            // 否则 % 会再被编码成 %25，Python 无法按中文标题精确匹配历史向量。
+            url += "?title=" + title;
         }
         ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
                 url, HttpMethod.GET, getEntity(),
