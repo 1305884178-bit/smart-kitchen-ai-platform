@@ -97,6 +97,12 @@ python3 tests/test_miniprogram.py
 
 ![已出餐订单详情](docs/images/miniprogram-served.png)
 
+### 6. AI 客服
+
+支持基于知识库推荐菜品，并结合实时配料、过敏原等信息提供饮食提示。
+
+![AI 客服](docs/images/miniprogram-ai-customer-service.png)
+
 ## 管理端界面展示
 
 ### 1. 管理端首页
