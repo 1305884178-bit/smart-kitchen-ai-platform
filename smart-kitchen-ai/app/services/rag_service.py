@@ -2,9 +2,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from app.db.milvus_client import get_milvus_client, COLLECTION_NAME
 from app.config import settings
-from app.services.dish_dict import get_dish_names
+from app.services.reranker_service import reranker_service
 from datetime import datetime
+from collections import Counter
+from math import log
 import logging
+import re
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -46,17 +49,9 @@ text_splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=50
 )
 
-# 轻量字面匹配用的口味/场景关键词（非穷举，命中即在混合排序中加分）
-TASTE_KEYWORDS = [
-    "辣", "清淡", "甜", "酸甜", "酸", "咸", "鲜", "锅气", "蒜香", "蜜汁", "椰香",
-    "汤", "凉菜", "热菜", "素菜", "海鲜", "主食", "饮料", "热饮", "冷饮",
-    "下酒", "开胃", "解腻", "滋补", "养生", "招牌", "下饭", "爽脆", "软嫩",
-    "小孩", "儿童", "老人", "素", "冰爽", "气泡", "茶", "酒",
-]
-# 关键词加权上限，避免字面匹配压过向量语义分
-KEYWORD_SCORE_CAP = 0.45
-DISH_NAME_BONUS = 0.15
-KEYWORD_BONUS = 0.03
+BM25_K1 = 1.5
+BM25_B = 0.75
+LEXICAL_SCAN_LIMIT = 16384  # 当前知识库规模下全量读取已发布分块，避免维护第二份易失效索引
 
 
 def _escape(value: str) -> str:
@@ -125,30 +120,144 @@ def process_and_store_document(content: str, metadata: dict, version: str, statu
     return document_id, len(chunks)
 
 
-def _keyword_score(query: str, text: str, dish_names: list[str]) -> float:
-    """轻量关键词命中加权：菜名命中权重高于口味词，整体封顶。"""
-    if not text:
-        return 0.0
-    score = 0.0
-    for name in dish_names:
-        if name and name in query and name in text:
-            score += DISH_NAME_BONUS
-    for kw in TASTE_KEYWORDS:
-        if kw in query and kw in text:
-            score += KEYWORD_BONUS
-    return min(score, KEYWORD_SCORE_CAP)
+def _build_filter(version: str | None = None) -> str:
+    """Dense 与 BM25 共享同一可见性过滤，禁止草稿/归档知识进入任一召回路径。"""
+    now_iso = datetime.now().isoformat(timespec="seconds")
+    filters = [
+        'status == "active"',
+        f'(effective_from == "" or effective_from <= "{now_iso}")',
+    ]
+    if version:
+        filters.append(f'version == "{_escape(version)}"')
+    return " and ".join(filters)
+
+
+def _to_hit(item: dict, *, distance: float | None = None) -> dict:
+    """把 Milvus search/query 返回统一为检索候选结构。"""
+    entity = item.get("entity", item) or {}
+    return {
+        "id": item.get("id", entity.get("id")),
+        "distance": distance if distance is not None else item.get("distance"),
+        "text": entity.get("text"),
+        "document_id": entity.get("document_id"),
+        "chunk_index": entity.get("chunk_index"),
+        "title": entity.get("title"),
+        "version": entity.get("version"),
+    }
+
+
+def _chunk_key(hit: dict) -> str:
+    """RRF 去重键：优先 Milvus 主键，兼容旧数据中没有 id 的场景。"""
+    if hit.get("id") is not None:
+        return f"id:{hit['id']}"
+    return f"chunk:{hit.get('document_id', '')}:{hit.get('chunk_index', '')}"
+
+
+def _tokenize_for_bm25(text: str) -> list[str]:
+    """中文使用字符二元词，英文/数字保留词元，兼顾菜名精确匹配和口语检索。"""
+    tokens: list[str] = []
+    for part in re.findall(r"[\u4e00-\u9fff]+|[a-zA-Z0-9]+", (text or "").lower()):
+        if re.fullmatch(r"[\u4e00-\u9fff]+", part):
+            if len(part) == 1:
+                tokens.append(part)
+            else:
+                tokens.extend(part[i:i + 2] for i in range(len(part) - 1))
+        else:
+            tokens.append(part)
+    return tokens
+
+
+def _bm25_rank(query: str, rows: list[dict], limit: int) -> list[dict]:
+    """标准 Okapi BM25，返回独立于 Dense 的稀疏召回候选。"""
+    query_terms = _tokenize_for_bm25(query)
+    if not query_terms or not rows:
+        return []
+
+    documents = [_tokenize_for_bm25(row.get("text") or "") for row in rows]
+    doc_freq: Counter = Counter()
+    for terms in documents:
+        doc_freq.update(set(terms))
+    avg_length = sum(len(terms) for terms in documents) / len(documents) or 1.0
+
+    scored: list[tuple[float, int]] = []
+    for index, terms in enumerate(documents):
+        term_freq = Counter(terms)
+        score = 0.0
+        for term in set(query_terms):
+            frequency = term_freq.get(term, 0)
+            if not frequency:
+                continue
+            idf = log(1 + (len(documents) - doc_freq[term] + 0.5) / (doc_freq[term] + 0.5))
+            denominator = frequency + BM25_K1 * (1 - BM25_B + BM25_B * len(terms) / avg_length)
+            score += idf * frequency * (BM25_K1 + 1) / denominator
+        if score > 0:
+            scored.append((score, index))
+
+    ranked = []
+    for score, index in sorted(scored, key=lambda item: item[0], reverse=True)[:limit]:
+        hit = _to_hit(rows[index])
+        hit["bm25_score"] = score
+        ranked.append(hit)
+    return ranked
+
+
+def _dense_recall(client, query_vector: list[float], filter_expr: str, limit: int) -> list[dict]:
+    search_res = client.search(
+        collection_name=COLLECTION_NAME,
+        data=[query_vector],
+        limit=limit,
+        filter=filter_expr,
+        output_fields=["text", "document_id", "chunk_index", "version", "status",
+                       "effective_from", "title"],
+    )
+    if not search_res:
+        return []
+    return [_to_hit(hit, distance=hit.get("distance")) for hit in search_res[0]]
+
+
+def _bm25_recall(client, query: str, filter_expr: str, limit: int) -> list[dict]:
+    """读取与 Dense 相同过滤范围的分块，临时计算 BM25，避免索引生命周期不一致。"""
+    try:
+        rows = client.query(
+            collection_name=COLLECTION_NAME,
+            filter=filter_expr,
+            output_fields=["id", "text", "document_id", "chunk_index", "version", "title"],
+            limit=LEXICAL_SCAN_LIMIT,
+        )
+        return _bm25_rank(query, rows or [], limit)
+    except Exception as exc:
+        logger.warning("[RAG] BM25 召回失败，仅使用 Dense 结果: %s", exc)
+        return []
+
+
+def _rrf_fuse(dense_hits: list[dict], bm25_hits: list[dict], rrf_k: int) -> list[dict]:
+    """Reciprocal Rank Fusion：融合不同分数尺度的 Dense 与 BM25 排名。"""
+    fused: dict[str, dict] = {}
+    for source, hits in (("dense", dense_hits), ("bm25", bm25_hits)):
+        for rank, hit in enumerate(hits, start=1):
+            key = _chunk_key(hit)
+            candidate = fused.setdefault(key, dict(hit, rrf_score=0.0, retrieval_sources=[]))
+            candidate["rrf_score"] += 1 / (rrf_k + rank)
+            candidate["retrieval_sources"].append(source)
+            if source == "dense":
+                candidate["distance"] = hit.get("distance")
+                candidate["dense_rank"] = rank
+            else:
+                candidate["bm25_score"] = hit.get("bm25_score")
+                candidate["bm25_rank"] = rank
+    return sorted(fused.values(), key=lambda item: item["rrf_score"], reverse=True)
 
 
 def search_knowledge(query: str, top_k: int = 3, version: str = None):
     """
-    在 Milvus 向量数据库中进行相似度检索。
+    在 Milvus 向量数据库中进行混合检索。
 
     默认只检索 C 端可用知识：status == "active" 且（无生效时间或已生效），
     管理端显式传 version 时才追加版本过滤；draft/archived 永不对 C 端可见。
 
-    混合检索：向量召回放大后按「向量距离 + 关键词命中加权」重排截 top_k，
-    再按 RAG_SCORE_THRESHOLD 过滤低相关结果；全部低于阈值时返回空列表，
-    由客服走拒答话术，不把噪声塞给模型。
+    Dense 与 BM25 各自粗召回，再以 RRF 融合；配置云端 Reranker 后才对融合候选重排。
+    未配置、超时或响应异常时严格降级为 RRF Top-K。RAG_SCORE_THRESHOLD 仅用于
+    Dense-only 候选的噪声过滤；BM25 命中的实体候选可进入后续融合与重排。
 
     Args:
         query (str): 查询文本
@@ -162,51 +271,32 @@ def search_knowledge(query: str, top_k: int = 3, version: str = None):
 
     # 1. Vectorize query
     query_vector = embeddings.embed_query(query)
+    filter_expr = _build_filter(version)
 
-    # 2. 默认过滤：active 且已生效；仅显式传 version 时追加版本条件
-    now_iso = datetime.now().isoformat(timespec="seconds")
-    filters = [
-        'status == "active"',
-        f'(effective_from == "" or effective_from <= "{now_iso}")',
+    # 2. Dense / BM25 独立粗召回。任一分支故障不影响另一分支。
+    dense_limit = max(top_k, settings.rag_dense_recall_limit)
+    bm25_limit = max(top_k, settings.rag_bm25_recall_limit)
+    dense_hits = _dense_recall(client, query_vector, filter_expr, dense_limit)
+    bm25_hits = _bm25_recall(client, query, filter_expr, bm25_limit)
+
+    # 3. RRF 融合后先去掉无词法证据且低于 Dense 相关度阈值的噪声。
+    fused = _rrf_fuse(dense_hits, bm25_hits, max(settings.rag_rrf_k, 1))
+    fused = [
+        hit for hit in fused
+        if hit.get("bm25_score", 0) > 0
+        or (hit.get("distance") or 0) >= settings.rag_score_threshold
     ]
-    if version:
-        filters.append(f'version == "{_escape(version)}"')
-    filter_expr = " and ".join(filters)
+    candidate_limit = max(top_k, settings.rag_fusion_candidate_limit)
+    fused = fused[:candidate_limit]
+    if not fused:
+        return []
 
-    # 3. Search in Milvus（向量召回放大，留给关键词重排空间）
-    recall_limit = max(top_k * 3, 8)
-    search_res = client.search(
-        collection_name=COLLECTION_NAME,
-        data=[query_vector],
-        limit=recall_limit,
-        filter=filter_expr,
-        output_fields=["text", "document_id", "chunk_index", "version", "status",
-                       "effective_from", "title"]
-    )
-
-    # 4. Format + 混合重排
-    hits = []
-    if search_res and len(search_res) > 0:
-        for hit in search_res[0]:
-            entity = hit.get("entity", {})
-            hits.append({
-                "id": hit.get("id"),
-                "distance": hit.get("distance"),
-                "text": entity.get("text"),
-                "document_id": entity.get("document_id"),
-                "chunk_index": entity.get("chunk_index"),
-                "title": entity.get("title"),
-                "version": entity.get("version"),
-            })
-
-    dish_names = get_dish_names()
-    for h in hits:
-        h["score"] = (h["distance"] or 0) + _keyword_score(query, h.get("text") or "", dish_names)
-    hits.sort(key=lambda h: h["score"], reverse=True)
-    hits = hits[:top_k]
-
-    # 5. RAG 相似度阈值过滤（与语义缓存阈值独立）；全低于阈值则返回空
-    results = [h for h in hits if (h["distance"] or 0) >= settings.rag_score_threshold]
+    # 4. 可选云端 Reranker；未配置/失败时返回 None，严格降级到 RRF 结果。
+    reranked = reranker_service.rerank(query, fused, top_k)
+    results = reranked if reranked is not None else fused[:top_k]
+    strategy = "reranker" if reranked is not None else "rrf_fallback"
+    for hit in results:
+        hit["retrieval_strategy"] = strategy
     return results
 
 

@@ -5,7 +5,7 @@ RAG 与语义缓存评测脚本（可跑，非文档）。
 - 语义缓存：近义问句对算 embedding 余弦相似度，对照 SEMANTIC_CACHE_THRESHOLD（0.92）
   输出命中率 / 误命中率；阈值只读不改。
 - RAG：以 scripts/knowledge_corpus.py 的菜品知识卡为 golden，写入独立临时 Milvus 库
-  （不污染 data/milvus.db），统计 Recall@3 与低相关 query 的空结果率；
+  （不污染 data/milvus.db），统计 Recall@3、MRR 与低相关 query 的空结果率；
   RAG_SCORE_THRESHOLD 可在 0.55~0.70 微调（改 config/.env 后重跑本脚本对比）。
 
 用法：
@@ -107,6 +107,7 @@ def eval_rag():
 
     cases = _load_cases("rag_cases.json")
     recall_hits = recall_total = 0
+    reciprocal_rank_sum = 0.0
     empty_ok = empty_total = 0
     print(f"\n{'id':<9} {'expect':<6} {'结果数':<5} {'top1距离':<8} {'判定':<4} query")
     for c in cases:
@@ -118,18 +119,24 @@ def eval_rag():
             empty_ok += 1 if ok else 0
         else:
             recall_total += 1
-            corpus = "\n".join((r.get("title") or "") + " " + (r.get("text") or "") for r in results)
-            ok = any(g in corpus for g in c["golden"])
+            hit_rank = next((
+                index for index, result in enumerate(results, start=1)
+                if any(g in ((result.get("title") or "") + " " + (result.get("text") or "")) for g in c["golden"])
+            ), None)
+            ok = hit_rank is not None
             recall_hits += 1 if ok else 0
+            reciprocal_rank_sum += 1 / hit_rank if hit_rank else 0.0
         verdict = "✓" if ok else "✗"
         expect = "empty" if c["expect_empty"] else "recall"
         print(f"{c['id']:<9} {expect:<6} {len(results):<5} {top_distance:<8.4f} {verdict:<4} {c['query']}")
 
     recall_at_3 = recall_hits / recall_total if recall_total else 0.0
+    mrr = reciprocal_rank_sum / recall_total if recall_total else 0.0
     empty_rate = empty_ok / empty_total if empty_total else 0.0
     print(f"\nRecall@3（阈值过滤后）: {recall_at_3:.2%}  ({recall_hits}/{recall_total})")
+    print(f"MRR（首个正确结果倒数的均值）: {mrr:.4f}")
     print(f"低相关空结果率: {empty_rate:.2%}  ({empty_ok}/{empty_total})")
-    return {"recall_at_3": recall_at_3, "empty_rate": empty_rate}
+    return {"recall_at_3": recall_at_3, "mrr": mrr, "empty_rate": empty_rate}
 
 
 def main():

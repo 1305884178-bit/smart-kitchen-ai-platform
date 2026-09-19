@@ -1,5 +1,5 @@
 {
-  "description": "RAG 检索评测集：golden 为 scripts/knowledge_corpus.py 中的菜品名（命中任一即算召回）；expect_empty=true 表示低相关 query，应被 RAG_SCORE_THRESHOLD 过滤为空而不是返回噪声 top3。",
+  "description": "RAG 混合检索评测集：golden 为 scripts/knowledge_corpus.py 中的菜品名（命中任一即算召回）；包含语义偏好、精确菜名实体和低相关问题。expect_empty=true 表示不应向 LLM 注入噪声片段。",
   "cases": [
     {"id": "rag-01", "query": "有清淡的汤吗", "golden": ["玉米萝卜排骨汤", "椰子乌鸡汤"], "expect_empty": false},
     {"id": "rag-02", "query": "小孩能喝什么汤", "golden": ["玉米萝卜排骨汤"], "expect_empty": false},
@@ -18,10 +18,13 @@
     {"id": "rag-15", "query": "有什么解腻的饮料", "golden": ["柠檬茶", "天地一号"], "expect_empty": false},
     {"id": "rag-16", "query": "不喝酒有什么选择", "golden": ["天地一号"], "expect_empty": false},
     {"id": "rag-17", "query": "有米饭吗", "golden": ["白米饭"], "expect_empty": false},
-    {"id": "rag-18", "query": "今天天气怎么样", "golden": [], "expect_empty": true},
-    {"id": "rag-19", "query": "帮我写个Python代码", "golden": [], "expect_empty": true},
-    {"id": "rag-20", "query": "股票今天涨了吗", "golden": [], "expect_empty": true},
-    {"id": "rag-21", "query": "怎么换汽车轮胎", "golden": [], "expect_empty": true},
-    {"id": "rag-22", "query": "附近哪里有加油站", "golden": [], "expect_empty": true}
+    {"id": "rag-18", "query": "椰子乌鸡汤口味怎么样", "golden": ["椰子乌鸡汤"], "expect_empty": false},
+    {"id": "rag-19", "query": "铁观音有什么特点", "golden": ["铁观音"], "expect_empty": false},
+    {"id": "rag-20", "query": "黑叉烧是甜口吗", "golden": ["黑叉烧"], "expect_empty": false},
+    {"id": "rag-21", "query": "今天天气怎么样", "golden": [], "expect_empty": true},
+    {"id": "rag-22", "query": "帮我写个Python代码", "golden": [], "expect_empty": true},
+    {"id": "rag-23", "query": "股票今天涨了吗", "golden": [], "expect_empty": true},
+    {"id": "rag-24", "query": "怎么换汽车轮胎", "golden": [], "expect_empty": true},
+    {"id": "rag-25", "query": "附近哪里有加油站", "golden": [], "expect_empty": true}
   ]
 }

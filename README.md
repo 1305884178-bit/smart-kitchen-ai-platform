@@ -43,9 +43,10 @@
 
 ### 2. 版本化 RAG：把知识库做成可运营的数据源
 
-管理端支持上传或编辑知识文档，文档以标题、版本、状态、生效日期、分块数等元数据管理。检索时只使用已发布且已生效的内容，并通过“向量召回 + 关键词重排”提高菜名、配料等实体查询的命中稳定性。
+管理端支持上传或编辑知识文档，文档以标题、版本、状态、生效日期、分块数等元数据管理。检索时只使用已发布且已生效的内容，并通过“Dense 向量召回 + BM25 稀疏召回 → RRF 融合”兼顾语义表达与菜名等实体查询。
 
-- 文档采用分块、重叠切分后写入 Milvus；召回候选会按关键词再排序。
+- 文档采用分块、重叠切分后写入 Milvus；Dense 与 BM25 使用同一可见性过滤，避免草稿/归档内容进入任一召回分支。
+- 可选接入兼容 `query + documents + top_n` 协议的云端 Reranker；未配置、超时或调用失败时，严格回退至 RRF 融合结果。
 - 知识库版本指纹参与语义缓存键：知识变更后，旧答案不会继续命中为当前知识答案。
 - 将外部/知识库内容包裹为非指令数据，降低间接提示注入影响模型行为的风险。
 
@@ -78,7 +79,7 @@ flowchart LR
     AI --> CHAT[LangGraph ReAct 客服 Agent]
     AI --> PREDICT[LangGraph 备菜预测工作流]
 
-    CHAT --> RAG[知识检索工具]
+    CHAT --> RAG[混合知识检索]
     CHAT --> TOOLS[实时菜品工具]
     RAG --> MILVUS[(Milvus 向量库)]
     RAG --> KB[(MySQL 知识文档)]
@@ -155,6 +156,15 @@ flowchart TD
 
 语义缓存除了问题向量，还绑定知识库版本指纹。知识文档发布、归档或升级后，旧缓存自然不再与当前知识版本匹配；缓存异常时回退模型/检索主链路。
 
+### 检索链路可渐进增强
+
+```text
+Dense Top N + BM25 Top N → RRF 融合 → 可选云端 Reranker → Top K → LLM
+                                     └── 未配置 / 超时 / 失败 → RRF Top K
+```
+
+Reranker 不是运行前置条件。默认配置不携带 URL 和 API Key，不会发出任何云端请求；因此本地联调可直接使用 RRF 结果，获得可用密钥后仅通过环境变量开启重排。
+
 ### 可观测、可验证的 AI 输出
 
 - 预测结果带有置信度、降级级别和推理说明，运营人员可确认或覆盖建议。
@@ -180,7 +190,8 @@ flowchart TD
 - [ReAct 客服 Agent](smart-kitchen-ai/app/agents/cs_agent.py)：工具注册、模型配置与 Agent 创建。
 - [备菜预测 StateGraph](smart-kitchen-ai/app/agents/predict_agent.py)：并行数据节点、预测与结构化调整。
 - [实时菜品工具](smart-kitchen-ai/app/tools/dish_tools.py)：库存/配料/批量实时信息工具与超时处理。
-- [RAG 服务](smart-kitchen-ai/app/services/rag_service.py)：文档分块、检索、关键词重排与知识状态过滤。
+- [RAG 服务](smart-kitchen-ai/app/services/rag_service.py)：文档分块、Dense + BM25 粗召回、RRF 融合与知识状态过滤。
+- [云端 Reranker 适配层](smart-kitchen-ai/app/services/reranker_service.py)：可配置 HTTP 重排与无损 RRF 降级。
 - [查询改写](smart-kitchen-ai/app/services/query_rewrite.py)：规则优先的多轮指代消解与 LLM 兜底。
 - [语义缓存](smart-kitchen-ai/app/services/semantic_cache_service.py)：相似问题命中、知识版本指纹与降级处理。
 - [流式聊天接口](smart-kitchen-ai/app/api/chat.py)：SSE、取消生成、断连处理、鉴权入口。
@@ -235,7 +246,7 @@ python3 tests/test_stock_concurrency.py
 cd smart-kitchen-ai && .venv/bin/python eval/run_eval.py
 ```
 
-评测样例位于 [smart-kitchen-ai/eval](smart-kitchen-ai/eval)，当前包含 RAG 检索与语义缓存场景，适合作为新增知识、改动提示词或调整召回阈值后的回归检查入口。
+评测样例位于 [smart-kitchen-ai/eval](smart-kitchen-ai/eval)，包含语义偏好、精确菜名实体与低相关问题。RAG 评测输出 Recall@3、MRR 与低相关空结果率，适合作为调整召回参数、启用 Reranker 前后的回归检查入口。
 
 ## 项目结构
 
@@ -306,7 +317,8 @@ TODO-demo/
 ### 可展开讨论的设计选择
 
 - **为什么不把库存写进知识库？** 库存是高频变动的事实，向量库更新和缓存都可能陈旧；应通过受控工具在回答时查询。
-- **为什么要批量工具？** 多菜查询若逐个工具调用，会增加延迟和调用次数；批量接口能把多次往返合并，并让模型在同一份事实结果上组织回答。
+- **为什么混合检索不直接相加分数？** 向量相似度与 BM25 分数尺度不同，因此先独立召回，再使用只依赖排名的 RRF 融合；可选 Reranker 只处理少量融合候选，控制成本与延迟。
+- **为什么 Reranker 设计为可选？** 本地开发不需要额外部署模型或申请 API Key；无配置、超时、异常都回退至 RRF，保证客服主链路可用。
 - **如何避免知识更新后答旧内容？** 缓存键绑定知识版本指纹，文档状态/版本变化后旧语义缓存不会继续作为当前答案命中。
 - **为什么使用 LangGraph？** 客服 Agent 的工具循环和预测任务的多节点工作流有不同控制流；图结构使并行、状态传递、降级与测试边界更清晰。
 - **如何评估 Agent 改动？** 把代表性 RAG 与语义缓存问题沉淀为评测集，并结合鉴权、多轮、工具、预测等测试做回归验证。

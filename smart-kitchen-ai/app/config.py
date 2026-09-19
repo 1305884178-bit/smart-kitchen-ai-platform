@@ -43,6 +43,17 @@ class Settings:
     #   （无关 query 距离上限≈0.32，相关命中下限≈0.44，0.55 落在间隔内）。
     #   embedding 接口存在 ±0.02 抖动，边界 case 在 0.55~0.60 间敏感，微调请重跑评测。
     rag_score_threshold = float(os.getenv("RAG_SCORE_THRESHOLD", "0.55"))
+    # RAG 粗召回与融合：Dense / BM25 各自独立召回后使用 RRF 融合。
+    rag_dense_recall_limit = int(os.getenv("RAG_DENSE_RECALL_LIMIT", "12"))
+    rag_bm25_recall_limit = int(os.getenv("RAG_BM25_RECALL_LIMIT", "12"))
+    rag_fusion_candidate_limit = int(os.getenv("RAG_FUSION_CANDIDATE_LIMIT", "10"))
+    rag_rrf_k = int(os.getenv("RAG_RRF_K", "60"))
+    # 可选云端 Reranker。未同时配置开关、URL 和 Key 时严格走 RRF 降级，不发起网络调用。
+    reranker_enabled = os.getenv("RERANKER_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    reranker_api_url = os.getenv("RERANKER_API_URL", "").strip()
+    reranker_api_key = os.getenv("RERANKER_API_KEY", "").strip()
+    reranker_model = os.getenv("RERANKER_MODEL", "").strip()
+    reranker_timeout_seconds = float(os.getenv("RERANKER_TIMEOUT_SECONDS", "5"))
 
     # 归档知识文档的 Milvus 向量保留天数，超过后由定时任务物理删除（active 文档永不过期）
     kb_archived_retention_days = int(os.getenv("KB_ARCHIVED_RETENTION_DAYS", "7"))
