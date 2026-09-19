@@ -55,7 +55,7 @@ cd admin-web && npm run dev -- --host 0.0.0.0
 
 ## 数据库升级
 
-首次初始化请执行 `smart-kitchen/src/main/resources/db/schema.sql`。已有数据库升级 AI 知识库文档表时，执行 [Query_3.sql](queries/Query_3.sql)。更多说明见 [数据库迁移](docs/SETUP.md#数据库初始化与升级)。
+首次初始化请执行 `smart-kitchen/src/main/resources/db/schema.sql`。已有数据库升级 AI 知识库文档表时，依次执行 [Query_3.sql](queries/Query_3.sql) 与 [Query_4.sql](queries/Query_4.sql)。更多说明见 [数据库迁移](docs/SETUP.md#数据库初始化与升级)。
 
 ## 验证
 
@@ -65,17 +65,53 @@ cd smart-kitchen-ai && .venv/bin/python -m pytest tests/test_dish_tools_auth.py 
 python3 tests/test_miniprogram.py
 ```
 
-## 演示截图（待补充）
+## 管理端界面展示
 
-> 请将截图放入 `docs/images/`，再替换以下链接。截图不得包含真实手机号、Token、密钥或顾客隐私信息。
+### 1. 管理端首页
 
-| 场景 | 建议文件名 | 说明 |
-| --- | --- | --- |
-| 小程序点单与购物车 | `docs/images/miniprogram-order.png` | 展示选菜和提交订单 |
-| 加菜与结束用餐 | `docs/images/miniprogram-add-dish.png` | 展示加菜补付及“结束用餐”按钮 |
-| 厨房看板 | `docs/images/kitchen-board.png` | 展示待制作订单和完成出餐 |
-| 管理端仪表盘 | `docs/images/admin-dashboard.png` | 展示订单、库存预警等核心数据 |
-| AI 客服批量查询 | `docs/images/ai-batch-query.png` | 展示两道菜库存、配料和过敏原的一次性回答 |
+![管理端首页](docs/images/admin-dashboard.png)
+
+### 2. 厨房看板
+
+实时接收已支付订单，并支持完成出餐。
+
+![厨房看板](docs/images/admin-kitchen-board.png)
+
+### 3. 订单管理
+
+支持按订单状态和座位号筛选，查看订单详情、撤销订单和完成出餐。
+
+![订单管理](docs/images/admin-orders.png)
+
+### 4. 菜品管理
+
+维护菜品分类、价格、库存、配料、过敏原和上下架状态。
+
+![菜品管理](docs/images/admin-dishes.png)
+
+### 5. 库存管理
+
+展示库存预警状态，并支持人工调整库存。
+
+![库存管理](docs/images/admin-inventory.png)
+
+### 6. AI 备菜预测
+
+基于历史数据给出备菜建议量、置信度和推理说明，管理员可确认覆盖。
+
+![AI 备菜预测](docs/images/admin-ai-preparation-forecast.png)
+
+### 7. AI 知识库
+
+支持上传、查看、编辑和归档知识文档，为客服 AI 提供检索依据。
+
+![AI 知识库](docs/images/admin-ai-knowledge-base.png)
+
+### 8. 评价管理
+
+集中查看订单评分与评价内容，完整展示五级评分。
+
+![评价管理](docs/images/admin-reviews.png)
 
 ## 贡献与许可证
 
