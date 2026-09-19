@@ -21,3 +21,10 @@ LangGraph备菜预测面试题.md
 
 # Python 依赖安装目录（本地构建产物）
 smart-kitchen-ai/.deps/
+
+# AI 服务运行后产生的缓存、WAL 与索引不纳入版本控制。
+smart-kitchen-ai/data/milvus.db/LOCK
+smart-kitchen-ai/data/milvus.db/**/wal/
+smart-kitchen-ai/data/milvus.db/collections/ai_chat_semantic_cache/partitions/_default/data/data_*.parquet
+smart-kitchen-ai/data/milvus.db/collections/ai_chat_semantic_cache/partitions/_default/indexes/data_*.idx
+smart-kitchen-ai/data/milvus.db/collections/kitchen_knowledge/partitions/_default/indexes/data_*.idx
