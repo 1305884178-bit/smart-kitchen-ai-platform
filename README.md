@@ -1,144 +1,323 @@
-# 智慧后厨备菜与点单系统
+# 智慧后厨 Agent 应用平台
 
-面向餐厅点单、厨房出餐、库存管理和 AI 客服的一体化项目。顾客通过微信小程序点单、支付、加菜和评价；厨房通过看板接单出餐；管理端负责菜品、订单、库存和知识库管理；AI 服务提供菜品推荐、实时库存与配料查询，以及备菜预测能力。
+> 面向餐饮场景的 Agent 应用项目：将**可检索的运营知识**、**必须实时获取的业务数据**与**可落地执行的预测工作流**拆分处理，形成可追溯、可评测的智能客服与备菜决策能力。
 
-## 项目亮点
+这是一个全栈智慧餐饮项目，但 README 聚焦于 Agent 应用开发岗位最需要展示的部分：Agent 如何使用工具、RAG 如何接入业务知识、工作流如何编排，以及如何保证响应可靠与数据不过期。
 
-- 先付后做：订单支付成功后才进入厨房看板。
-- 加菜闭环：新增菜品创建子订单，补付成功后再推送厨房制作。
-- 用餐状态闭环：出餐后仍可加菜，全部菜品已付款且已出餐时可结束用餐并评价。
-- 实时库存：库存查询与下单共享 Redis 库存口径，异常时自动回源 MySQL。
-- AI 客服：支持菜品推荐、库存、配料与过敏原查询；多菜或“库存 + 配料”问题使用批量实时查询。
+## 目录
 
-## 架构
+- [项目定位](#项目定位)
+- [Agent 应用亮点](#agent-应用亮点)
+- [系统架构](#系统架构)
+- [核心 Agent 工作流](#核心-agent-工作流)
+- [关键工程设计](#关键工程设计)
+- [技术栈](#技术栈)
+- [核心代码索引](#核心代码索引)
+- [快速开始](#快速开始)
+- [验证与评测](#验证与评测)
+- [项目结构](#项目结构)
+- [界面展示](#界面展示)
+- [面试表达参考](#面试表达参考)
+- [安全与配置](#安全与配置)
+
+## 项目定位
+
+餐饮客服类问题不能只靠一次向量检索回答：例如“这道菜辣不辣”适合从知识库找答案，而“这两道菜现在有没有库存、配料是什么”必须访问最新业务数据。本项目将两类信息源显式分开：
+
+- **静态/运营知识**：菜品介绍、口味、过敏原、服务规则等，通过版本化知识库进入 RAG 检索链路。
+- **实时业务数据**：库存、配料、菜品状态，通过 Agent 工具调用 Java 业务服务获取，避免模型依据旧上下文臆测。
+- **决策型任务**：备菜预测由 LangGraph StateGraph 编排数据收集、时序推断、LLM 调整与保存，不把业务流程写成不可观测的单段提示词。
+
+## Agent 应用亮点
+
+### 1. ReAct 客服 Agent：检索与工具调用按问题路由
+
+客服 Agent 基于 LangGraph 的 `create_react_agent` 构建，模型会根据问题选择知识检索或实时工具，而不是把所有数据预先塞进上下文。
+
+- 支持菜品偏好检索、单菜库存、单菜配料，以及一次查询多道菜实时信息。
+- 批量工具一次接收最多 10 个菜名，合并返回库存、配料和过敏原，避免“查两个菜”时触发多次独立调用。
+- 工具结果由后端生成，模型只负责理解意图、调用工具和组织回答；实时字段不由模型自行推断。
+- 对话通过 SSE 流式输出，支持取消生成与客户端断连清理。
+
+![AI 客服：偏好推荐与多轮健康问答](docs/images/miniprogram-ai-customer-service.png)
+
+### 2. 版本化 RAG：把知识库做成可运营的数据源
+
+管理端支持上传或编辑知识文档，文档以标题、版本、状态、生效日期、分块数等元数据管理。检索时只使用已发布且已生效的内容，并通过“向量召回 + 关键词重排”提高菜名、配料等实体查询的命中稳定性。
+
+- 文档采用分块、重叠切分后写入 Milvus；召回候选会按关键词再排序。
+- 知识库版本指纹参与语义缓存键：知识变更后，旧答案不会继续命中为当前知识答案。
+- 将外部/知识库内容包裹为非指令数据，降低间接提示注入影响模型行为的风险。
+
+![AI 知识库：文档上传、版本与查看编辑](docs/images/admin-ai-knowledge-base.png)
+
+### 3. LangGraph 预测工作流：并行收集信号，结构化输出决策
+
+备菜预测不是单轮聊天。项目使用 `StateGraph` 组织销售数据、天气、节假日、评价等节点并行获取，再合并时序结果与 LLM 的结构化调整建议，最终保存可供管理端确认/覆盖的预测结果。
+
+- 并行采集近 30 天销售、目标日天气、节假日和近期评价，缩短独立 I/O 的串行等待。
+- 使用 Pydantic 约束 LLM 输出为结构化预测调整，而非依赖自由文本解析。
+- 在数据不足、天气缺失或规则冲突时保留降级说明，便于追溯建议的依据和置信度。
+
+![AI 备菜预测：建议量、置信度与推理说明](docs/images/admin-ai-preparation-forecast.png)
+
+### 4. 多轮理解与语义缓存：兼顾体验、成本与正确性
+
+- 查询改写采用“规则优先、LLM 兜底”：可将“它辣吗”结合上一轮菜名改写为完整问题。
+- Milvus 语义缓存以相似度阈值复用稳定问答，缓存不可用时自动退化为正常推理，不影响主链路。
+- 库存、配料等需要最新状态的问题由业务工具提供事实来源；知识问答与实时查询各自使用合适的数据路径。
+
+## 系统架构
 
 ```mermaid
 flowchart LR
-    MP[微信小程序] --> JAVA[Java 后端\nSpring Boot :8080]
-    ADMIN[管理端\nVue + Vite :5173] --> JAVA
-    JAVA --> MYSQL[(MySQL)]
+    MP[微信小程序] --> JAVA[Java 业务服务]
+    ADMIN[Vue 管理端] --> JAVA
+
+    MP --> AI[Python AI 服务]
+    AI --> CHAT[LangGraph ReAct 客服 Agent]
+    AI --> PREDICT[LangGraph 备菜预测工作流]
+
+    CHAT --> RAG[知识检索工具]
+    CHAT --> TOOLS[实时菜品工具]
+    RAG --> MILVUS[(Milvus 向量库)]
+    RAG --> KB[(MySQL 知识文档)]
+    TOOLS -->|内部鉴权| JAVA
+
+    CHAT --> CACHE[(Redis / 语义缓存)]
+    JAVA --> MYSQL[(MySQL 业务数据)]
     JAVA --> REDIS[(Redis)]
-    JAVA --> MQ[(RabbitMQ)]
-    MP --> AI[AI 服务\nFastAPI :8000]
-    AI --> JAVA
-    AI --> MILVUS[(Milvus Lite)]
-    AI --> LLM[LLM / Embedding 服务]
+    JAVA --> MQ[RabbitMQ / WebSocket]
+    PREDICT --> JAVA
 ```
 
-## 目录说明
+数据职责按“谁最接近事实”划分：Java 服务负责订单、库存与菜品事实；Python 服务负责 Agent 编排、模型调用、RAG 和预测；管理端和小程序提供两类业务入口。
 
-| 目录 | 说明 |
-| --- | --- |
-| `smart-kitchen/` | Java 后端、订单与厨房业务、管理接口 |
-| `smart-kitchen-ai/` | FastAPI AI 客服、RAG、备菜预测 |
-| `admin-web/` | Vue 管理端 |
-| `miniprogram/` | 微信小程序 |
-| `queries/` | 数据库升级脚本 |
-| `docs/` | 环境、数据库、Gitee Go 和协作说明 |
+## 核心 Agent 工作流
+
+### 客服问答链路
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant API as /ai/chat SSE
+    participant A as ReAct Agent
+    participant K as 知识检索工具
+    participant T as 实时菜品工具
+    participant J as Java 业务服务
+
+    U->>API: 提问 / 携带会话历史
+    API->>A: 查询改写 + Agent 调用
+    alt 菜品知识、偏好、规则问题
+        A->>K: 检索已发布且生效的知识
+        K-->>A: 相关片段与元数据
+    else 库存、配料、过敏原等实时问题
+        A->>T: 调用单菜或批量实时工具
+        T->>J: 内部接口请求
+        J-->>T: 当前业务数据
+        T-->>A: 结构化工具结果
+    end
+    A-->>API: 流式生成回答
+    API-->>U: SSE 增量输出
+```
+
+客服工具边界：
+
+- **`search_dish_by_preference`**：处理口味、饮食偏好、菜品推荐等知识型问题。
+- **`check_dish_inventory`**：查询某一道菜当前库存。
+- **`get_dish_ingredients`**：查询某一道菜的配料及过敏原提示。
+- **`get_dishes_realtime_info`**：一次查询多道菜的库存、配料和过敏原，降低多工具往返。
+
+### 备菜预测链路
+
+```mermaid
+flowchart TD
+    S([开始]) --> A[并行：近 30 天销量]
+    S --> B[并行：天气]
+    S --> C[并行：节假日]
+    S --> D[并行：近期评价]
+    A --> E[时序预测与降级判断]
+    B --> F[LLM 结构化调整]
+    C --> F
+    D --> F
+    E --> F
+    F --> G[生成建议量、置信度与推理说明]
+    G --> H[保存预测结果]
+```
+
+## 关键工程设计
+
+### 事实与生成分离
+
+项目不要求大模型“记住”库存或配料。模型通过工具编排获得事实，生成层只负责解释与交互。这能降低幻觉风险，也使事实数据变动无需重建向量库。
+
+### 缓存随知识版本失效
+
+语义缓存除了问题向量，还绑定知识库版本指纹。知识文档发布、归档或升级后，旧缓存自然不再与当前知识版本匹配；缓存异常时回退模型/检索主链路。
+
+### 可观测、可验证的 AI 输出
+
+- 预测结果带有置信度、降级级别和推理说明，运营人员可确认或覆盖建议。
+- 预置 RAG 与语义缓存评测集，支持将典型问题沉淀为可重复验证的样例。
+- 覆盖聊天鉴权、多轮会话、工具鉴权、知识清理、预测与缓存等自动化测试。
+
+### 面向生产问题的防护
+
+- AI 接口使用 JWT 校验、会话归属校验与限流；限流服务不可用时有内存滑动窗口兜底。
+- Java 内部代理接口可启用独立内部令牌，限制 AI 服务访问实时业务数据的边界。
+- HTTP 工具调用设置连接与总超时，异常返回可解释的失败信息，避免卡死整个 Agent 回答。
+
+## 技术栈
+
+- **Agent / LLM**：LangGraph、LangChain、OpenAI 兼容模型接口、Pydantic Structured Output。
+- **RAG / 数据**：Milvus、向量检索、Redis 语义缓存、MySQL 版本化文档元数据。
+- **AI 服务**：FastAPI、SSE、httpx、pytest。
+- **业务服务**：Spring Boot 3、MyBatis-Plus、MySQL、Redis、RabbitMQ、WebSocket。
+- **客户端**：Vue 3 + Vite 管理端、微信小程序。
+
+## 核心代码索引
+
+- [ReAct 客服 Agent](smart-kitchen-ai/app/agents/cs_agent.py)：工具注册、模型配置与 Agent 创建。
+- [备菜预测 StateGraph](smart-kitchen-ai/app/agents/predict_agent.py)：并行数据节点、预测与结构化调整。
+- [实时菜品工具](smart-kitchen-ai/app/tools/dish_tools.py)：库存/配料/批量实时信息工具与超时处理。
+- [RAG 服务](smart-kitchen-ai/app/services/rag_service.py)：文档分块、检索、关键词重排与知识状态过滤。
+- [查询改写](smart-kitchen-ai/app/services/query_rewrite.py)：规则优先的多轮指代消解与 LLM 兜底。
+- [语义缓存](smart-kitchen-ai/app/services/semantic_cache_service.py)：相似问题命中、知识版本指纹与降级处理。
+- [流式聊天接口](smart-kitchen-ai/app/api/chat.py)：SSE、取消生成、断连处理、鉴权入口。
+- [Java 实时数据代理](smart-kitchen/src/main/java/com/smartkitchen/controller/DishProxyController.java)：给 AI 工具提供受控的菜品实时数据接口。
 
 ## 快速开始
 
-详细步骤见 [本地启动与数据库说明](docs/SETUP.md)。
+### 1. 准备基础服务
+
+启动 MySQL、Redis、RabbitMQ 与 Milvus，并按项目配置创建数据库。SQL 初始化及补丁位于 [queries](queries) 目录。
 
 ```bash
-cd smart-kitchen && mvn spring-boot:run
-cd smart-kitchen-ai && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-cd admin-web && npm run dev -- --host 0.0.0.0
+mysql -u root -p < queries/Query_4.sql
 ```
 
-| 服务 | 地址 |
-| --- | --- |
-| Java API | `http://localhost:8080` |
-| AI API | `http://localhost:8000` |
-| 管理端 | `http://localhost:5173` |
-| 微信小程序 | 使用微信开发者工具导入 `miniprogram/` |
+### 2. 启动 Java 业务服务
 
-## 数据库升级
+```bash
+cd smart-kitchen
+mvn spring-boot:run
+```
 
-首次初始化请执行 `smart-kitchen/src/main/resources/db/schema.sql`。已有数据库升级 AI 知识库文档表时，依次执行 [Query_3.sql](queries/Query_3.sql) 与 [Query_4.sql](queries/Query_4.sql)。更多说明见 [数据库迁移](docs/SETUP.md#数据库初始化与升级)。
+### 3. 启动 Python AI 服务
 
-## 验证
+```bash
+cd smart-kitchen-ai
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+```
+
+### 4. 启动管理端
+
+```bash
+cd admin-web
+npm install
+npm run dev
+```
+
+小程序可使用微信开发者工具打开 [miniprogram](miniprogram) 目录。首次运行前，请按各服务的 `.env.example` 或配置文件填写数据库、Redis、向量库、模型接口和内部服务令牌。
+
+## 验证与评测
+
+以下命令覆盖业务服务、AI 服务及小程序相关检查；请在完成依赖配置后执行：
 
 ```bash
 cd smart-kitchen && mvn test
-cd smart-kitchen-ai && .venv/bin/python -m pytest tests/test_dish_tools_auth.py -q
-python3 tests/test_miniprogram.py
+cd ../smart-kitchen-ai && .venv/bin/python -m pytest tests -q
+cd .. && python3 tests/test_miniprogram.py
+python3 tests/test_stock_concurrency.py
+cd smart-kitchen-ai && .venv/bin/python eval/run_eval.py
 ```
 
-## 小程序点餐与用餐闭环
+评测样例位于 [smart-kitchen-ai/eval](smart-kitchen-ai/eval)，当前包含 RAG 检索与语义缓存场景，适合作为新增知识、改动提示词或调整召回阈值后的回归检查入口。
 
-顾客可在小程序内完成选菜、支付、加菜、结束用餐，并通过 AI 客服获取菜品推荐和饮食提示。
+## 项目结构
 
-### 点餐与支付
+```text
+TODO-demo/
+├── smart-kitchen/                 # Java 业务服务：订单、库存、菜品、内部代理
+├── smart-kitchen-ai/              # Python AI 服务：Agent、RAG、缓存、预测、评测
+│   ├── app/agents/                # ReAct 客服 Agent 与预测 StateGraph
+│   ├── app/tools/                 # Agent 可调用的业务工具
+│   ├── app/services/              # RAG、缓存、查询改写、LLM 服务
+│   ├── tests/                     # AI 链路自动化测试
+│   └── eval/                      # RAG / 缓存评测样例
+├── admin-web/                     # Vue 管理端
+├── miniprogram/                   # 微信小程序
+├── queries/                       # 数据库初始化与升级脚本
+└── docs/images/                   # README 界面截图
+```
+
+## 界面展示
+
+### 小程序：点单到出餐的业务闭环
 
 <p align="center">
-  <img src="docs/images/miniprogram-ordering.png" alt="微信小程序点单" width="31%" />
-  <img src="docs/images/miniprogram-payment.png" alt="支付页面" width="31%" />
-  <img src="docs/images/miniprogram-order-detail.png" alt="订单详情" width="31%" />
+  <img src="docs/images/miniprogram-ordering.png" alt="微信小程序点单" width="30%" />
+  <img src="docs/images/miniprogram-payment.png" alt="支付倒计时" width="30%" />
+  <img src="docs/images/miniprogram-add-dish.png" alt="加菜确认" width="30%" />
 </p>
-
-<p align="center"><sub>① 分类浏览与购物车下单　　② 15 分钟支付倒计时　　③ 支付后的订单明细</sub></p>
-
-- 顾客可按分类浏览菜品，实时看到“有货 / 售罄”状态。
-- 订单创建后进入支付页，未支付订单将在 15 分钟后自动取消。
-- 支付成功后可查看订单明细，并在用餐期间发起加菜。
-
-### 加菜、出餐与结束用餐
+<p align="center">点单、支付倒计时与加菜确认。订单状态贯穿小程序、厨房看板与管理端。</p>
 
 <p align="center">
-  <img src="docs/images/miniprogram-add-dish.png" alt="确认加菜" width="31%" />
-  <img src="docs/images/miniprogram-served.png" alt="厨房出餐后的订单详情" width="31%" />
-  <img src="docs/images/miniprogram-ai-customer-service.png" alt="AI 客服" width="31%" />
+  <img src="docs/images/miniprogram-order-detail.png" alt="订单详情" width="30%" />
+  <img src="docs/images/miniprogram-served.png" alt="已出餐订单" width="30%" />
+  <img src="docs/images/miniprogram-ai-customer-service.png" alt="AI 客服" width="30%" />
 </p>
+<p align="center">订单详情会随状态更新；AI 客服提供推荐、配料与饮食问题咨询。</p>
 
-<p align="center"><sub>④ 确认座位号后提交加菜　　⑤ 厨房出餐后继续加菜或结束用餐　　⑥ AI 客服饮食咨询</sub></p>
+### 管理端：Agent 可落地的业务入口
 
-- 加菜会生成子订单，补付成功后才会同步到厨房制作。
-- 全部菜品出餐后，订单显示“已上菜”，顾客可以继续加菜或结束用餐并评价。
-- AI 客服支持知识库菜品推荐，并结合实时配料、过敏原提供饮食提示。
+<p align="center">
+  <img src="docs/images/admin-ai-knowledge-base.png" alt="AI 知识库" width="48%" />
+  <img src="docs/images/admin-ai-preparation-forecast.png" alt="AI 备菜预测" width="48%" />
+</p>
+<p align="center">知识库运营与备菜预测结果，是 Agent 能力进入日常业务流程的两个管理入口。</p>
 
-## 管理端界面展示
-
-管理端覆盖经营总览、厨房协作、订单、菜品、库存、AI 预测、知识库与评价管理。
-
-### 经营总览与厨房协作
+<details>
+<summary>展开查看其余业务管理界面</summary>
 
 <p align="center">
   <img src="docs/images/admin-dashboard.png" alt="管理端首页" width="48%" />
   <img src="docs/images/admin-kitchen-board.png" alt="厨房看板" width="48%" />
 </p>
-
-<p align="center"><sub>仪表盘：今日订单、营收、待出餐及库存预警　　厨房看板：实时接收订单并完成出餐</sub></p>
-
-### 订单与菜品管理
-
 <p align="center">
   <img src="docs/images/admin-orders.png" alt="订单管理" width="48%" />
   <img src="docs/images/admin-dishes.png" alt="菜品管理" width="48%" />
 </p>
-
-<p align="center"><sub>订单管理：筛选、详情、撤销与出餐操作　　菜品管理：分类、价格、库存、配料与过敏原</sub></p>
-
-### 库存与 AI 备菜预测
-
 <p align="center">
   <img src="docs/images/admin-inventory.png" alt="库存管理" width="48%" />
-  <img src="docs/images/admin-ai-preparation-forecast.png" alt="AI 备菜预测" width="48%" />
-</p>
-
-<p align="center"><sub>库存管理：库存预警与人工调整　　AI 备菜预测：建议量、置信度、推理说明与人工确认</sub></p>
-
-### AI 知识库与评价管理
-
-<p align="center">
-  <img src="docs/images/admin-ai-knowledge-base.png" alt="AI 知识库" width="48%" />
   <img src="docs/images/admin-reviews.png" alt="评价管理" width="48%" />
 </p>
+</details>
 
-<p align="center"><sub>AI 知识库：上传、查看、编辑与归档知识文档　　评价管理：完整展示五级评分和评价内容</sub></p>
+## 面试表达参考
 
-## 贡献与许可证
+### 30 秒项目介绍
 
-- 协作约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-- Gitee Go 校验步骤见 [docs/GITEE_GO.md](docs/GITEE_GO.md)。
-- 本项目以 [MIT License](LICENSE) 发布。
+“我做了一个餐饮场景的 Agent 应用。核心难点是区分知识型问题和实时业务问题：菜品口味、服务规则走版本化 RAG；库存、配料、过敏原则由 ReAct Agent 调用 Java 实时工具获取。我还用 LangGraph 编排了备菜预测工作流，把销量、天气、节假日和评价并行汇总，并让模型以 Pydantic 结构化结果给出调整建议。工程上做了多轮查询改写、知识版本感知的语义缓存、SSE 流式输出、取消和鉴权限流。”
+
+### 可展开讨论的设计选择
+
+- **为什么不把库存写进知识库？** 库存是高频变动的事实，向量库更新和缓存都可能陈旧；应通过受控工具在回答时查询。
+- **为什么要批量工具？** 多菜查询若逐个工具调用，会增加延迟和调用次数；批量接口能把多次往返合并，并让模型在同一份事实结果上组织回答。
+- **如何避免知识更新后答旧内容？** 缓存键绑定知识版本指纹，文档状态/版本变化后旧语义缓存不会继续作为当前答案命中。
+- **为什么使用 LangGraph？** 客服 Agent 的工具循环和预测任务的多节点工作流有不同控制流；图结构使并行、状态传递、降级与测试边界更清晰。
+- **如何评估 Agent 改动？** 把代表性 RAG 与语义缓存问题沉淀为评测集，并结合鉴权、多轮、工具、预测等测试做回归验证。
+
+## 安全与配置
+
+- 不提交 `.env`、模型 API Key、数据库密码和内部令牌；本地按示例配置创建环境变量。
+- AI 聊天接口要求用户身份校验，并验证会话归属；生产环境应开启令牌黑名单与限流依赖。
+- Java 内部代理接口应配置独立 `AI_INTERNAL_TOKEN`，不要直接对公网暴露库存、配料等内部数据接口。
+- 知识库文档属于不可信输入。项目对检索内容做数据边界处理；仍建议在生产环境增加上传文件类型、大小与内容审核策略。
+
+## 说明
+
+本项目的亮点是**一个 ReAct 客服 Agent**与**一个 LangGraph 预测工作流**，并非为了包装而宣称多 Agent 系统。后续可在现有工具边界上继续演进，例如增加订单查询、预约排队等专用工具，并以评测集约束每次能力扩展的质量。
