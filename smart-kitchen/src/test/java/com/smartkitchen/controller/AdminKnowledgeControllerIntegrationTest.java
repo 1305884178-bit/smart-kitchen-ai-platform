@@ -21,6 +21,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -156,5 +157,27 @@ public class AdminKnowledgeControllerIntegrationTest {
     public void testArchiveDocumentUnauthorized() throws Exception {
         mockMvc.perform(post("/api/admin/knowledge/1/archive"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    public void testGetDocumentIncludesContent() throws Exception {
+        KnowledgeDocument doc = new KnowledgeDocument();
+        doc.setTitle("可查看知识");
+        doc.setContent("这是一段需要在管理端查看和编辑的知识原文。");
+        doc.setChunkCount(1);
+        doc.setVersion("1.0");
+        doc.setStatus("active");
+        doc.setUpdateTime(LocalDateTime.now());
+        knowledgeDocumentService.save(doc);
+
+        String response = mockMvc.perform(get("/api/admin/knowledge/" + doc.getId())
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+
+        Result<Map<String, Object>> result = objectMapper.readValue(response,
+                new TypeReference<Result<Map<String, Object>>>() {});
+        assertEquals(200, result.getCode());
+        assertEquals(doc.getContent(), result.getData().get("content"));
     }
 }

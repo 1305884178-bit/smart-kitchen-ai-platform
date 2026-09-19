@@ -29,6 +29,22 @@ public class AdminKnowledgeController {
         return Result.success(knowledgeDocumentService.listDocuments());
     }
 
+    @GetMapping("/{id}")
+    public Result<KnowledgeDocument> getDocument(@PathVariable Long id) {
+        KnowledgeDocument document = knowledgeDocumentService.getDocument(id);
+        return document == null ? Result.error(404, "文档不存在") : Result.success(document);
+    }
+
+    @PutMapping("/{id}")
+    public Result<KnowledgeDocument> updateDocument(@PathVariable Long id, @RequestBody KnowledgeUploadDTO dto) {
+        try {
+            KnowledgeDocument document = knowledgeDocumentService.updateDocument(id, dto);
+            return document == null ? Result.error(404, "文档不存在") : Result.success(document);
+        } catch (Exception e) {
+            return Result.error(500, e.getMessage());
+        }
+    }
+
     /**
      * 上传文档至知识库（状态机：MySQL processing → Python 向量化 → active/failed）
      * @param dto 文档内容和元数据

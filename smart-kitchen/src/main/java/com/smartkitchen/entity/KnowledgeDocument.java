@@ -16,6 +16,7 @@ public class KnowledgeDocument {
     @TableId(type = IdType.AUTO)
     private Long id;
     private String title;
+    private String content;
     private Integer chunkCount;
     private String version;
     private String status;

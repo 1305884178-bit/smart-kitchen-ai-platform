@@ -22,9 +22,10 @@
       <el-table :data="reviews" stripe v-loading="loading">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="orderId" label="订单ID" width="80" />
-        <el-table-column label="评分" width="100">
+        <el-table-column label="评分" width="150">
           <template #default="{ row }">
-            <el-rate :model-value="row.score" disabled show-score />
+            <el-rate :model-value="Number(row.score)" :max="5" disabled />
+            <span class="score-text">{{ row.score }} 分</span>
           </template>
         </el-table-column>
         <el-table-column prop="comment" label="评价内容" min-width="260" />
@@ -70,4 +71,5 @@ onMounted(() => {
 .table-card {
   margin-bottom: 16px;
 }
+.score-text { margin-left: 8px; color: #606266; white-space: nowrap; }
 </style>

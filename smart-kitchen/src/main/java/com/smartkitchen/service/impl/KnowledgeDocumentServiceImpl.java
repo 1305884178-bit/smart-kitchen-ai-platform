@@ -57,6 +57,26 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
         return list(wrapper);
     }
 
+    @Override
+    public KnowledgeDocument getDocument(Long id) {
+        KnowledgeDocument document = this.getById(id);
+        // 内容字段上线前，原文仅存在于 Milvus 的分块中。首次查看时按 chunk_index
+        // 恢复并回填 MySQL，之后查看和编辑均无需再依赖向量库。
+        if (document != null && (document.getContent() == null || document.getContent().isBlank())) {
+            try {
+                String recoveredContent = pythonAIService.getKnowledgeContent(String.valueOf(id));
+                if (recoveredContent != null && !recoveredContent.isBlank()) {
+                    document.setContent(recoveredContent);
+                    document.setUpdateTime(LocalDateTime.now());
+                    this.updateById(document);
+                }
+            } catch (Exception e) {
+                log.warn("恢复历史知识原文失败 document_id={}: {}", id, e.getMessage());
+            }
+        }
+        return document;
+    }
+
     /**
      * 知识库上传状态机：processing → active / failed
      */
@@ -66,6 +86,10 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
         KnowledgeDocument document = new KnowledgeDocument();
         document.setTitle(dto.getTitle() != null && !dto.getTitle().isEmpty()
                 ? dto.getTitle() : "未命名文档");
+        if (dto.getContent() == null || dto.getContent().isBlank()) {
+            throw new RuntimeException("文档内容不能为空");
+        }
+        document.setContent(dto.getContent().trim());
         document.setChunkCount(0);
         // 版本号是标签而非数值（AI 侧按字符串做 version == "v2.0" 过滤），原样保存保持前后一致
         document.setVersion(dto.getVersion() != null && !dto.getVersion().isEmpty()
@@ -99,6 +123,45 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
             this.updateById(document);
             invalidateKbVersionFingerprint();
             throw new RuntimeException("Python AI服务调用失败：" + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public KnowledgeDocument updateDocument(Long id, KnowledgeUploadDTO dto) {
+        KnowledgeDocument document = this.getById(id);
+        if (document == null) return null;
+        if (dto.getContent() == null || dto.getContent().isBlank()) {
+            throw new RuntimeException("文档内容不能为空");
+        }
+        document.setTitle(dto.getTitle() == null || dto.getTitle().isBlank() ? document.getTitle() : dto.getTitle().trim());
+        document.setContent(dto.getContent().trim());
+        document.setVersion(dto.getVersion() == null || dto.getVersion().isBlank() ? document.getVersion() : dto.getVersion().trim());
+        document.setEffectiveFrom(dto.getEffectiveFrom());
+        document.setStatus("processing");
+        document.setUpdateTime(LocalDateTime.now());
+        this.updateById(document);
+        invalidateKbVersionFingerprint();
+        try {
+            deleteVectorSilently(id);
+            KnowledgeUploadDTO reindex = new KnowledgeUploadDTO();
+            reindex.setTitle(document.getTitle());
+            reindex.setContent(document.getContent());
+            reindex.setVersion(document.getVersion());
+            reindex.setStatus("active");
+            reindex.setEffectiveFrom(document.getEffectiveFrom());
+            reindex.setMetadata(dto.getMetadata());
+            document.setChunkCount(extractChunkCount(pythonAIService.uploadKnowledge(reindex, String.valueOf(id))));
+            document.setStatus("active");
+            document.setUpdateTime(LocalDateTime.now());
+            this.updateById(document);
+            invalidateKbVersionFingerprint();
+            return document;
+        } catch (Exception e) {
+            document.setStatus("failed");
+            document.setUpdateTime(LocalDateTime.now());
+            this.updateById(document);
+            invalidateKbVersionFingerprint();
+            throw new RuntimeException("知识库重建失败：" + e.getMessage(), e);
         }
     }
 

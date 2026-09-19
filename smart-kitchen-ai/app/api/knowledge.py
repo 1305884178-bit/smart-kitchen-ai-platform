@@ -11,7 +11,8 @@ from app.models.schemas import (
 from app.services.rag_service import (
     process_and_store_document,
     search_knowledge,
-    delete_chunks_by_document_id
+    delete_chunks_by_document_id,
+    get_document_content
 )
 from app.services.ocr_service import extract_text_ocr
 from app.utils.auth import verify_internal_token
@@ -86,6 +87,15 @@ async def delete_document(request: DocumentDeleteRequest):
             document_id=request.document_id,
             deleted=deleted
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/document/{document_id}")
+async def get_document(document_id: str):
+    """读取历史文档的已存储分块并按原顺序恢复原文。"""
+    try:
+        return {"content": get_document_content(document_id)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

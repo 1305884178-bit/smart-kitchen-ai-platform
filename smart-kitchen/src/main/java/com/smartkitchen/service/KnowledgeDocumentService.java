@@ -18,6 +18,10 @@ public interface KnowledgeDocumentService extends IService<KnowledgeDocument> {
      */
     List<KnowledgeDocument> listDocuments();
 
+    KnowledgeDocument getDocument(Long id);
+
+    KnowledgeDocument updateDocument(Long id, KnowledgeUploadDTO dto);
+
     /**
      * 解析上传的文件并清洗为纯文本（供前端预览回填后再走上传流程）。
      * 支持 .docx / .pdf / .png / .jpg；扫描版 PDF（文本层过短）与图片走 OCR；

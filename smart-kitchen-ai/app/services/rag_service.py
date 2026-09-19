@@ -224,6 +224,36 @@ def delete_chunks_by_document_id(document_id: str) -> int:
     return 0
 
 
+def get_document_content(document_id: str) -> str:
+    """按 chunk_index 恢复一个文档的原文，供内容字段上线前的历史数据迁移使用。"""
+    client = get_milvus_client()
+    rows = client.query(
+        collection_name=COLLECTION_NAME,
+        filter=f'document_id == "{_escape(document_id)}"',
+        output_fields=["text", "chunk_index"],
+        limit=16384
+    )
+    chunks = sorted(rows or [], key=lambda row: row.get("chunk_index", 0))
+    if not chunks:
+        return ""
+
+    # 分块之间有 50 字符重叠；仅在相邻边界确实重合时去重，避免错误吞掉正文。
+    content = ""
+    for row in chunks:
+        chunk = row.get("text") or ""
+        if not content:
+            content = chunk
+            continue
+        max_overlap = min(100, len(content), len(chunk))
+        overlap = 0
+        for size in range(max_overlap, 0, -1):
+            if content.endswith(chunk[:size]):
+                overlap = size
+                break
+        content += chunk[overlap:]
+    return content
+
+
 def list_all_document_ids() -> set[str]:
     """列出 kitchen_knowledge 中全部 document_id（供孤儿向量清理比对 MySQL 元数据）。"""
     client = get_milvus_client()

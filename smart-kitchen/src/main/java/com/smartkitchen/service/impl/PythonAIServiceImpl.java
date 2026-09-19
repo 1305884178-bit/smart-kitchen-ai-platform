@@ -143,6 +143,20 @@ public class PythonAIServiceImpl implements PythonAIService {
         return response.getBody();
     }
 
+    @Override
+    public String getKnowledgeContent(String documentId) {
+        String url = pythonServiceUrl + "/ai/knowledge/document/" + documentId;
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                url, HttpMethod.GET, getEntity(),
+                new ParameterizedTypeReference<Map<String, Object>>() {}
+        );
+        Map<String, Object> responseBody = response.getBody();
+        if (responseBody == null || responseBody.get("content") == null) {
+            return "";
+        }
+        return String.valueOf(responseBody.get("content"));
+    }
+
     /**
      * OCR 识别文件内容（代理调用 Python /ai/knowledge/ocr）
      * @param file 图片（png/jpg/jpeg）或扫描版 PDF

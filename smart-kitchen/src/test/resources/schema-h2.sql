@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS `ai_prediction_record` (
 CREATE TABLE IF NOT EXISTS `ai_knowledge_document` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '自增',
   `title` varchar(128) NOT NULL COMMENT '文档标题',
+  `content` clob COMMENT '文档原文（管理端查看与编辑使用）',
   `chunk_count` int NOT NULL DEFAULT '0' COMMENT '分块数',
   `version` varchar(20) NOT NULL DEFAULT '1.0' COMMENT '版本号',
   `status` varchar(16) NOT NULL DEFAULT 'draft' COMMENT 'draft/processing/active/failed/archived',

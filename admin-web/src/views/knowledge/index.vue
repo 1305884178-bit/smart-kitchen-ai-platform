@@ -57,25 +57,81 @@
         </el-table-column>
         <el-table-column prop="chunkCount" label="分块数" width="80" />
         <el-table-column prop="createTime" label="创建时间" width="170" />
+        <el-table-column label="操作" width="190" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openDocument(row.id, 'view')">查看</el-button>
+            <el-button link type="primary" @click="openDocument(row.id, 'edit')">编辑</el-button>
+            <el-button
+              v-if="row.status !== 'archived'"
+              link
+              type="warning"
+              @click="archiveDocument(row.id)"
+            >归档</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
+
+    <el-dialog v-model="documentDialogVisible" :title="documentMode === 'view' ? '查看知识' : '编辑知识'" width="720px" destroy-on-close>
+      <el-form :model="documentForm" label-width="90px">
+        <el-form-item label="标题">
+          <el-input v-model="documentForm.title" :readonly="documentMode === 'view'" />
+        </el-form-item>
+        <el-form-item label="文档内容">
+          <el-input
+            v-model="documentForm.content"
+            type="textarea"
+            :rows="14"
+            :readonly="documentMode === 'view'"
+            placeholder="暂无可恢复的原文；请编辑后补充内容"
+          />
+        </el-form-item>
+        <el-form-item label="版本号">
+          <el-input v-model="documentForm.version" :readonly="documentMode === 'view'" />
+        </el-form-item>
+        <el-form-item label="生效日期">
+          <el-date-picker
+            v-model="documentForm.effectiveFrom"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm:ss"
+            :disabled="documentMode === 'view'"
+            placeholder="立即生效"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="documentDialogVisible = false">{{ documentMode === 'view' ? '关闭' : '取消' }}</el-button>
+        <el-button v-if="documentMode === 'edit'" type="primary" :loading="saving" @click="saveDocument">保存并重新构建知识库</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import request from '@/utils/request'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const documents = ref([])
 const loading = ref(false)
 const uploading = ref(false)
+const documentDialogVisible = ref(false)
+const documentMode = ref('view')
+const saving = ref(false)
 
 const uploadForm = reactive({
   title: '',
   content: '',
   version: '',
   status: 'draft',
+  effectiveFrom: '',
+})
+
+const documentForm = reactive({
+  id: null,
+  title: '',
+  content: '',
+  version: '',
   effectiveFrom: '',
 })
 
@@ -119,6 +175,59 @@ async function handleUpload() {
     loadDocuments()
   } catch (e) {}
   finally { uploading.value = false }
+}
+
+async function openDocument(id, mode) {
+  try {
+    const res = await request.get(`/api/admin/knowledge/${id}`)
+    const document = res.data
+    Object.assign(documentForm, {
+      id: document.id,
+      title: document.title || '',
+      content: document.content || '',
+      version: document.version || '',
+      effectiveFrom: document.effectiveFrom || '',
+    })
+    documentMode.value = mode
+    documentDialogVisible.value = true
+    if (!documentForm.content) {
+      ElMessage.warning('该历史文档没有可恢复的原文，请编辑后补充内容')
+    }
+  } catch (e) {}
+}
+
+async function saveDocument() {
+  if (!documentForm.content.trim()) {
+    ElMessage.warning('文档内容不能为空')
+    return
+  }
+  saving.value = true
+  try {
+    await request.put(`/api/admin/knowledge/${documentForm.id}`, {
+      title: documentForm.title,
+      content: documentForm.content,
+      version: documentForm.version,
+      effectiveFrom: documentForm.effectiveFrom || null,
+      metadata: {},
+    })
+    ElMessage.success('文档已更新，知识库已重新构建')
+    documentDialogVisible.value = false
+    loadDocuments()
+  } catch (e) {}
+  finally { saving.value = false }
+}
+
+async function archiveDocument(id) {
+  try {
+    await ElMessageBox.confirm('归档后该知识不会再被客服 AI 检索，是否继续？', '归档知识', {
+      confirmButtonText: '确认归档',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await request.post(`/api/admin/knowledge/${id}/archive`)
+    ElMessage.success('文档已归档')
+    loadDocuments()
+  } catch (e) {}
 }
 
 onMounted(() => {

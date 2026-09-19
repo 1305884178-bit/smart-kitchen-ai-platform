@@ -43,6 +43,13 @@ public interface PythonAIService {
     Map<String, Object> deleteKnowledge(String documentId);
 
     /**
+     * 读取已向量化文档的原文。用于兼容内容字段上线前创建的历史知识。
+     * @param documentId 文档ID（Milvus document_id）
+     * @return 按分块顺序恢复的文档内容；不存在时返回空字符串
+     */
+    String getKnowledgeContent(String documentId);
+
+    /**
      * OCR 识别文件内容（代理调用 Python /ai/knowledge/ocr）
      * @param file 图片（png/jpg/jpeg）或扫描版 PDF
      * @return 识别出的纯文本
