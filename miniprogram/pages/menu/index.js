@@ -1,7 +1,6 @@
 // pages/menu/index.js
 const request = require('../../utils/request');
 const cart = require('../../utils/cart');
-const { DEFAULT_DISH_IMAGE, resolveDishImage } = require('../../utils/dish-image');
 
 Page({
   data: {
@@ -78,9 +77,7 @@ Page({
     const params = activeCategoryId > 0 ? { categoryId: activeCategoryId } : {};
     request.get('/api/dish/list', params, { showLoading: true })
       .then(dishes => {
-        const filtered = dishes
-          .filter(d => d.status === 1)
-          .map(d => ({ ...d, displayImage: resolveDishImage(d.image) }));
+        const filtered = dishes.filter(d => d.status === 1);
         this.setData({ dishes: filtered });
       })
       .catch(() => {
@@ -105,7 +102,6 @@ Page({
     const dishStatusMap = this.data.allDishStatusMap || {};
     const items = cart.getCartItems().map(item => ({
       ...item,
-      displayImage: resolveDishImage(item.image),
       active: dishStatusMap[item.dishId] !== undefined ? dishStatusMap[item.dishId] === 1 : false
     }));
 
@@ -129,7 +125,7 @@ Page({
       dishId: dish.id,
       dishName: dish.name,
       price: dish.price,
-      image: dish.displayImage || resolveDishImage(dish.image)
+      image: dish.image
     });
     wx.showToast({ title: `已加入购物车`, icon: 'success', duration: 1000 });
     this._updateCartBadge();
@@ -141,23 +137,6 @@ Page({
   onDishTap(e) {
     const dishId = e.currentTarget.dataset.dishId;
     wx.navigateTo({ url: `/pages/dish-detail/index?id=${dishId}` });
-  },
-
-  /** 远程图片域名未配置、对象不存在等情况下回退为包内图片，不显示空白。 */
-  onDishImageError(e) {
-    const dishId = e.currentTarget.dataset.dishId;
-    const dishes = this.data.dishes.map(dish => (
-      String(dish.id) === String(dishId) ? { ...dish, displayImage: DEFAULT_DISH_IMAGE } : dish
-    ));
-    this.setData({ dishes });
-  },
-
-  onCartImageError(e) {
-    const dishId = e.currentTarget.dataset.dishId;
-    const cartItems = this.data.cartItems.map(item => (
-      String(item.dishId) === String(dishId) ? { ...item, displayImage: DEFAULT_DISH_IMAGE } : item
-    ));
-    this.setData({ cartItems });
   },
 
   /**
