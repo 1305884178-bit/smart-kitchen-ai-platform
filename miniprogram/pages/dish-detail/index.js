@@ -1,6 +1,7 @@
 // pages/dish-detail/index.js
 const request = require('../../utils/request');
 const cart = require('../../utils/cart');
+const { DEFAULT_DISH_IMAGE, resolveDishImage } = require('../../utils/dish-image');
 
 Page({
   data: {
@@ -21,7 +22,10 @@ Page({
   _loadDishDetail(dishId) {
     request.get(`/api/dish/detail/${dishId}`)
       .then(dish => {
-        this.setData({ dish, loading: false });
+        this.setData({
+          dish: { ...dish, displayImage: resolveDishImage(dish.image) },
+          loading: false
+        });
       })
       .catch(() => {
         this.setData({ loading: false });
@@ -42,9 +46,16 @@ Page({
       dishId: dish.id,
       dishName: dish.name,
       price: dish.price,
-      image: dish.image
+      image: dish.displayImage || resolveDishImage(dish.image)
     });
     wx.showToast({ title: '已加入购物车', icon: 'success' });
+  },
+
+  onDishImageError() {
+    const dish = this.data.dish;
+    if (dish && dish.displayImage !== DEFAULT_DISH_IMAGE) {
+      this.setData({ dish: { ...dish, displayImage: DEFAULT_DISH_IMAGE } });
+    }
   },
 
   /**

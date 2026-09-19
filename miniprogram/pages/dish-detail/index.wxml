@@ -4,7 +4,7 @@
 
   <block wx:elif="{{dish}}">
     <!-- 菜品大图 -->
-    <image class="detail-img" src="{{dish.image || '/images/default-dish.png'}}" mode="aspectFill" />
+    <image class="detail-img" src="{{dish.displayImage}}" mode="aspectFill" binderror="onDishImageError" />
 
     <view class="card">
       <view class="detail-name">{{dish.name}}</view>

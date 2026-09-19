@@ -14,7 +14,7 @@
   <!-- 菜品列表 -->
   <scroll-view class="dish-list" scroll-y>
     <view class="dish-card" wx:for="{{dishes}}" wx:key="id" data-dish-id="{{item.id}}" bindtap="onDishTap">
-      <image class="dish-img" src="{{item.image || '/images/default-dish.png'}}" mode="aspectFill" />
+      <image class="dish-img" src="{{item.displayImage}}" mode="aspectFill" data-dish-id="{{item.id}}" binderror="onDishImageError" />
       <view class="dish-info">
         <view class="dish-name">{{item.name}}</view>
         <view class="dish-meta">
@@ -60,7 +60,7 @@
 
     <scroll-view class="cart-popup-body" scroll-y>
       <view class="cart-popup-item" wx:for="{{cartItems}}" wx:key="dishId">
-        <image class="cart-item-img" src="{{item.image || '/images/default-dish.png'}}" mode="aspectFill" />
+        <image class="cart-item-img" src="{{item.displayImage}}" mode="aspectFill" data-dish-id="{{item.dishId}}" binderror="onCartImageError" />
         <view class="cart-item-info">
           <text class="cart-item-name">{{item.dishName}}</text>
           <text class="cart-item-price">
