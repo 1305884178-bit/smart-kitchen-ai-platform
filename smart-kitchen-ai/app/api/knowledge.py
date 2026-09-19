@@ -92,10 +92,10 @@ async def delete_document(request: DocumentDeleteRequest):
 
 
 @router.get("/document/{document_id}")
-async def get_document(document_id: str):
-    """读取历史文档的已存储分块并按原顺序恢复原文。"""
+async def get_document(document_id: str, title: str | None = None):
+    """读取历史文档的已存储分块；早期 UUID 数据按精确标题兼容恢复。"""
     try:
-        return {"content": get_document_content(document_id)}
+        return {"content": get_document_content(document_id, title)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

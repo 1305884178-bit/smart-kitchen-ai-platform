@@ -64,7 +64,7 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
         // 恢复并回填 MySQL，之后查看和编辑均无需再依赖向量库。
         if (document != null && (document.getContent() == null || document.getContent().isBlank())) {
             try {
-                String recoveredContent = pythonAIService.getKnowledgeContent(String.valueOf(id));
+                String recoveredContent = pythonAIService.getKnowledgeContent(String.valueOf(id), document.getTitle());
                 if (recoveredContent != null && !recoveredContent.isBlank()) {
                     document.setContent(recoveredContent);
                     document.setUpdateTime(LocalDateTime.now());

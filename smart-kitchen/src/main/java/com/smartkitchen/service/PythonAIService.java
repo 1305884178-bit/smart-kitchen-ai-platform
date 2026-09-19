@@ -47,7 +47,7 @@ public interface PythonAIService {
      * @param documentId 文档ID（Milvus document_id）
      * @return 按分块顺序恢复的文档内容；不存在时返回空字符串
      */
-    String getKnowledgeContent(String documentId);
+    String getKnowledgeContent(String documentId, String title);
 
     /**
      * OCR 识别文件内容（代理调用 Python /ai/knowledge/ocr）

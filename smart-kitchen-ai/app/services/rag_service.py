@@ -224,15 +224,33 @@ def delete_chunks_by_document_id(document_id: str) -> int:
     return 0
 
 
-def get_document_content(document_id: str) -> str:
-    """按 chunk_index 恢复一个文档的原文，供内容字段上线前的历史数据迁移使用。"""
+def get_document_content(document_id: str, title: str | None = None) -> str:
+    """按 chunk_index 恢复一个文档的原文，兼容早期 UUID document_id 的历史数据。"""
     client = get_milvus_client()
     rows = client.query(
         collection_name=COLLECTION_NAME,
         filter=f'document_id == "{_escape(document_id)}"',
-        output_fields=["text", "chunk_index"],
+        output_fields=["id", "text", "chunk_index", "document_id"],
         limit=16384
     )
+
+    # 早期上传使用了 Python 生成的 UUID，而 MySQL 元数据使用自增 ID。
+    # 两者无法通过 ID 对应时，按精确标题选择最近写入的一组分块恢复。
+    if not rows and title:
+        title_rows = client.query(
+            collection_name=COLLECTION_NAME,
+            filter=f'title == "{_escape(title)}"',
+            output_fields=["id", "text", "chunk_index", "document_id"],
+            limit=16384
+        )
+        by_document = {}
+        for row in title_rows or []:
+            by_document.setdefault(row.get("document_id"), []).append(row)
+        if by_document:
+            rows = max(
+                by_document.values(),
+                key=lambda group: max(item.get("id", 0) for item in group)
+            )
     chunks = sorted(rows or [], key=lambda row: row.get("chunk_index", 0))
     if not chunks:
         return ""
