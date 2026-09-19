@@ -1,7 +1,9 @@
 import os
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
-from app.tools.dish_tools import search_dish_by_preference, check_dish_inventory, get_dish_ingredients
+from app.tools.dish_tools import (
+    search_dish_by_preference, check_dish_inventory, get_dish_ingredients, get_dishes_realtime_info
+)
 from app.config import settings
 
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "prompts")
@@ -24,7 +26,8 @@ llm = ChatOpenAI(
 tools = [
     search_dish_by_preference,
     check_dish_inventory,
-    get_dish_ingredients
+    get_dish_ingredients,
+    get_dishes_realtime_info
 ]
 
 # Create the ReAct agent with function calling capabilities

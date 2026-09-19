@@ -6,6 +6,7 @@ import com.smartkitchen.common.DishStatusEnum;
 import com.smartkitchen.dto.DishDetailVO;
 import com.smartkitchen.dto.DishIngredientVO;
 import com.smartkitchen.dto.DishInventoryVO;
+import com.smartkitchen.dto.DishRealtimeInfoVO;
 import com.smartkitchen.entity.Category;
 import com.smartkitchen.entity.Dish;
 import com.smartkitchen.entity.OrderDetail;
@@ -193,6 +194,26 @@ public class DishServiceImpl extends ServiceImpl<DishMapper, Dish> implements Di
         vo.setIngredients(dish.getIngredients());
         vo.setAllergens(dish.getAllergens());
         return vo;
+    }
+
+    @Override
+    public List<DishRealtimeInfoVO> getRealtimeInfoByNames(List<String> dishNames) {
+        return dishNames.stream().map(dishName -> {
+            DishRealtimeInfoVO vo = new DishRealtimeInfoVO();
+            vo.setQueryName(dishName);
+            Dish dish = queryByName(dishName);
+            if (dish == null) {
+                vo.setFound(false);
+                return vo;
+            }
+            vo.setFound(true);
+            vo.setName(dish.getName());
+            vo.setDailyStock(resolveRemainingStock(dish));
+            vo.setStatus(dish.getStatus());
+            vo.setIngredients(dish.getIngredients());
+            vo.setAllergens(dish.getAllergens());
+            return vo;
+        }).toList();
     }
 
     /**

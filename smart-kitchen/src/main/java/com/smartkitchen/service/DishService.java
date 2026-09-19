@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.smartkitchen.dto.DishDetailVO;
 import com.smartkitchen.dto.DishIngredientVO;
 import com.smartkitchen.dto.DishInventoryVO;
+import com.smartkitchen.dto.DishRealtimeInfoVO;
 import com.smartkitchen.entity.Dish;
 
 import java.util.List;
@@ -47,4 +48,11 @@ public interface DishService extends IService<Dish> {
      * @return 配料VO，未找到返回null
      */
     DishIngredientVO getIngredientsByName(String dishName);
+
+    /**
+     * 批量查询菜品实时库存、配料和过敏原；未命中的菜品也保留在结果中。
+     * @param dishNames 菜品名称列表
+     * @return 与输入顺序一致的实时信息列表
+     */
+    List<DishRealtimeInfoVO> getRealtimeInfoByNames(List<String> dishNames);
 }

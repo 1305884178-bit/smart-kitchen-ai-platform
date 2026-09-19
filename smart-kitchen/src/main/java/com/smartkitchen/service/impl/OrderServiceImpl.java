@@ -34,6 +34,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import jakarta.annotation.PostConstruct;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -77,6 +78,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     @Autowired
     private OrderTimeoutMessageSender orderTimeoutMessageSender;
+
+    @Value("${smart-kitchen.order.pay-timeout-ms:900000}")
+    private long payTimeoutMs;
 
     private static final String STOCK_PREFIX = "dish:stock:";
 
@@ -208,14 +212,18 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order == null) {
             throw new RuntimeException("订单不存在");
         }
-        // 应用层预校验用于友好报错，并发最终裁决由 SQL 条件更新完成
-        if (order.getStatus() != OrderStatusEnum.SERVED.getCode() && order.getStatus() != OrderStatusEnum.ORDERED.getCode()) {
-            throw new RuntimeException("当前状态不可支付");
+
+        // 支付入口统一按父订单聚合：即使客户端误传加菜子单 ID，也支付该父单下全部待支付项。
+        if (order.getParentOrderId() != null) {
+            order = this.getById(order.getParentOrderId());
+            if (order == null) {
+                throw new RuntimeException("原订单不存在");
+            }
         }
 
         // 本次需要合并支付的未支付子订单（加菜订单）：ORDERED/SERVED 且 pay_time 为空
         List<Order> childOrders = this.lambdaQuery()
-                .eq(Order::getParentOrderId, orderId)
+                .eq(Order::getParentOrderId, order.getId())
                 .list();
         List<Order> unpaidChildren = childOrders.stream()
                 .filter(c -> c.getPayTime() == null)
@@ -223,8 +231,16 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                         || c.getStatus() == OrderStatusEnum.SERVED.getCode())
                 .toList();
 
+        // 应用层预校验用于友好报错，并发最终裁决由 SQL 条件更新完成。
+        // 父单已经结账时，仍可能存在待补付的加菜子单，此时必须允许继续走补付。
+        boolean parentPayable = order.getStatus() == OrderStatusEnum.SERVED.getCode()
+                || order.getStatus() == OrderStatusEnum.ORDERED.getCode();
+        if (!parentPayable && unpaidChildren.isEmpty()) {
+            throw new RuntimeException("当前状态不可支付");
+        }
+
         // 父单已支付但仍有未支付子单时允许再支付（只给未支付子单写 pay_time），否则拒绝重复支付
-        boolean parentNeedPay = order.getPayTime() == null;
+        boolean parentNeedPay = order.getPayTime() == null && parentPayable;
         if (!parentNeedPay && unpaidChildren.isEmpty()) {
             throw new RuntimeException("该订单已支付，请勿重复操作");
         }
@@ -236,8 +252,8 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         List<Order> boardPushOrders = new ArrayList<>();
 
         if (parentNeedPay) {
-            int affected = orderMapper.markPaidIfUnpaid(orderId, paymentTradeNo, payTime,
-                    OrderStatusEnum.ORDERED.getCode(), OrderStatusEnum.SERVED.getCode(), OrderStatusEnum.PAID.getCode());
+            int affected = orderMapper.markPaidIfUnpaid(order.getId(), paymentTradeNo, payTime,
+                    OrderStatusEnum.ORDERED.getCode(), OrderStatusEnum.SERVED.getCode());
             if (affected == 0) {
                 // 并发下另一事务已先完成支付/状态变更（含与超时取消竞争，超时单已被取消时报错）
                 throw new RuntimeException("订单状态已变更或已支付，请刷新后重试");
@@ -253,7 +269,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
             childIndex++;
             int childAffected = orderMapper.markPaidIfUnpaid(child.getId(),
                     paymentTradeNo + "_" + childIndex, payTime,
-                    OrderStatusEnum.ORDERED.getCode(), OrderStatusEnum.SERVED.getCode(), OrderStatusEnum.PAID.getCode());
+                    OrderStatusEnum.ORDERED.getCode(), OrderStatusEnum.SERVED.getCode());
             if (childAffected == 0) {
                 throw new RuntimeException("子订单状态已变更，请刷新后重试");
             }
@@ -280,6 +296,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         // 应用层预校验用于友好报错，并发最终裁决由 SQL 条件更新完成
         if (order.getStatus() != OrderStatusEnum.ORDERED.getCode() && order.getStatus() != OrderStatusEnum.SERVED.getCode()) {
             throw new RuntimeException("当前状态不可撤销");
+        }
+        if (order.getPayTime() != null) {
+            throw new RuntimeException("订单已支付，不可撤销");
         }
 
         // 只有未出餐的订单撤销才返还库存
@@ -424,11 +443,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (order.getStatus() != OrderStatusEnum.ORDERED.getCode()) {
             throw new RuntimeException("当前状态不可操作出餐");
         }
-        // 若顾客已提前支付，出餐后自动流转到 PAID
-        int newStatus = order.getPayTime() != null
-                ? OrderStatusEnum.PAID.getCode()
-                : OrderStatusEnum.SERVED.getCode();
-        int affected = orderMapper.serveIfOrdered(orderId, newStatus, LocalDateTime.now(), OrderStatusEnum.ORDERED.getCode());
+        // 出餐只改变制作/用餐状态。支付由 pay_time 独立表达，顾客结束用餐后才关闭为 PAID。
+        int affected = orderMapper.serveIfOrdered(orderId, OrderStatusEnum.SERVED.getCode(),
+                LocalDateTime.now(), OrderStatusEnum.ORDERED.getCode());
         if (affected == 0) {
             throw new RuntimeException("订单状态已变更，请刷新后重试");
         }
@@ -534,6 +551,44 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 stringRedisTemplate.execute(returnStockScript, keys, stockLuaArgs(quantities, initStocks));
             }
             throw e;
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void finishMeal(Long orderId) {
+        Order parentOrder = this.getById(orderId);
+        if (parentOrder == null) {
+            throw new RuntimeException("订单不存在");
+        }
+        if (parentOrder.getParentOrderId() != null) {
+            throw new RuntimeException("请从原订单确认结束用餐");
+        }
+        if (parentOrder.getStatus() == OrderStatusEnum.PAID.getCode()) {
+            throw new RuntimeException("订单已结束，请勿重复操作");
+        }
+
+        List<Order> childOrders = this.lambdaQuery()
+                .eq(Order::getParentOrderId, parentOrder.getId())
+                .list();
+        List<Order> activeOrders = new ArrayList<>();
+        activeOrders.add(parentOrder);
+        childOrders.stream()
+                .filter(child -> child.getStatus() != OrderStatusEnum.CANCELLED.getCode())
+                .forEach(activeOrders::add);
+
+        boolean allPaidAndServed = activeOrders.stream().allMatch(order ->
+                order.getPayTime() != null && order.getStatus() == OrderStatusEnum.SERVED.getCode());
+        if (!allPaidAndServed) {
+            throw new RuntimeException("请等待全部菜品出餐并完成支付后再结束用餐");
+        }
+
+        for (Order order : activeOrders) {
+            int affected = orderMapper.finishMealIfServedAndPaid(order.getId(),
+                    OrderStatusEnum.SERVED.getCode(), OrderStatusEnum.PAID.getCode());
+            if (affected == 0) {
+                throw new RuntimeException("订单状态已变更，请刷新后重试");
+            }
         }
     }
 
@@ -643,7 +698,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             vo.setTotalAmount(order.getTotalAmount().add(childTotal));
 
-            // 合并状态：所有子订单都完成才算已上菜/已结账
+            // 合并状态：所有未取消子订单均完成才算已上菜/已结账
             List<Order> orderChildren = childOrders.stream()
                     .filter(c -> c.getParentOrderId().equals(order.getId()))
                     .toList();
@@ -689,11 +744,12 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         vo.setTotalAmount(order.getTotalAmount().add(childTotal));
 
-        // 合并状态：所有子订单都完成才算已上菜/已结账
+        // 合并状态：所有未取消子订单均完成才算已上菜/已结账
         vo.setStatus(computeMergedStatus(order, childOrders));
 
         // 待支付金额：只算未支付部分（已支付的父单/子单不重复计入，加菜补付场景只显示加菜金额）
         vo.setPayableAmount(computePayableAmount(order, childOrders));
+        vo.setPayDeadline(computePayDeadline(order, childOrders));
 
         vo.setAvailableActions(getAvailableActions(order, childOrders));
         return vo;
@@ -720,24 +776,46 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
     }
 
     /**
+     * 取所有待支付订单中最早的创建时间，避免多次加菜时把较早子单的支付窗口延长。
+     */
+    private LocalDateTime computePayDeadline(Order parentOrder, List<Order> childOrders) {
+        List<Order> unpaidOrders = new ArrayList<>();
+        if (isAwaitingPayment(parentOrder)) {
+            unpaidOrders.add(parentOrder);
+        }
+        childOrders.stream()
+                .filter(this::isAwaitingPayment)
+                .forEach(unpaidOrders::add);
+        return unpaidOrders.stream()
+                .map(Order::getCreateTime)
+                .filter(java.util.Objects::nonNull)
+                .min(LocalDateTime::compareTo)
+                .map(createTime -> createTime.plusNanos(payTimeoutMs * 1_000_000L))
+                .orElse(null);
+    }
+
+    private boolean isAwaitingPayment(Order order) {
+        return order.getPayTime() == null
+                && (order.getStatus() == OrderStatusEnum.ORDERED.getCode()
+                || order.getStatus() == OrderStatusEnum.SERVED.getCode());
+    }
+
+    /**
      * 计算父子订单的合并状态
-     * 规则：任一取消→取消；全部至少SERVED→SERVED；全部PAID→PAID；否则→ORDERED
+     * 规则：父单取消→取消；忽略已取消的加菜子单；其余全部至少 SERVED→SERVED；全部 PAID→PAID；否则→ORDERED
      */
     private int computeMergedStatus(Order parentOrder, List<Order> childOrders) {
         // 任一下单被取消 → 整体取消
         if (parentOrder.getStatus() == OrderStatusEnum.CANCELLED.getCode()) {
             return OrderStatusEnum.CANCELLED.getCode();
         }
-        for (Order child : childOrders) {
-            if (child.getStatus() == OrderStatusEnum.CANCELLED.getCode()) {
-                return OrderStatusEnum.CANCELLED.getCode();
-            }
-        }
-
         // 全部PAID → PAID
         boolean allPaid = parentOrder.getStatus() == OrderStatusEnum.PAID.getCode();
         if (allPaid) {
             for (Order child : childOrders) {
+                if (child.getStatus() == OrderStatusEnum.CANCELLED.getCode()) {
+                    continue;
+                }
                 if (child.getStatus() != OrderStatusEnum.PAID.getCode()) {
                     allPaid = false;
                     break;
@@ -754,6 +832,9 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         if (allServed) {
             for (Order child : childOrders) {
                 int cs = child.getStatus();
+                if (cs == OrderStatusEnum.CANCELLED.getCode()) {
+                    continue;
+                }
                 if (cs != OrderStatusEnum.SERVED.getCode() && cs != OrderStatusEnum.PAID.getCode()) {
                     allServed = false;
                     break;
@@ -848,7 +929,7 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
 
     /**
      * 根据订单状态计算可操作按钮列表（C端用，含子订单合并状态）
-     * 先付后做口径：支付成功（pay_time 写入）即具备评价资格，无需等待出餐结账（PAID）
+     * 支付与订单关闭分离：支付后可继续加菜，确认结束用餐（PAID）后才可评价。
      * @param parentOrder 父订单对象
      * @param childOrders 子订单列表（加菜订单）
      * @return 可用操作列表
@@ -865,37 +946,31 @@ public class OrderServiceImpl extends ServiceImpl<OrderMapper, Order> implements
         boolean hasUnpaidChild = childOrders.stream().anyMatch(c -> c.getPayTime() == null
                 && (c.getStatus() == OrderStatusEnum.ORDERED.getCode()
                 || c.getStatus() == OrderStatusEnum.SERVED.getCode()));
-        // 支付完成（pay_time 非空）且未评价 → 可评价
-        boolean canReview = parentOrder.getPayTime() != null && !hasReviewed(parentOrder.getId());
 
-        List<String> actions = new ArrayList<>();
-
-        if (status == OrderStatusEnum.ORDERED.getCode() || status == OrderStatusEnum.SERVED.getCode()) {
-            // 父单未支付 → 只能支付
-            if (parentOrder.getPayTime() == null) {
-                actions.add("PAY");
-                return actions;
-            }
-            // 父单已支付 → 可加菜；有未支付子单仍可补付；未评价可评价
-            actions.add("ADD_DISH");
-            if (hasUnpaidChild) {
-                actions.add("PAY");
-            }
-            if (canReview) {
-                actions.add("REVIEW");
-            }
-            return actions;
+        // 补付未完成时，冻结其他入口：防止顾客在加菜未支付时继续加菜或提前评价。
+        if (hasUnpaidChild) {
+            return List.of("PAY");
+        }
+        // 已结束用餐后才开放评价；关闭后的订单组不可再加菜。
+        if (status == OrderStatusEnum.PAID.getCode()) {
+            return hasReviewed(parentOrder.getId()) ? new ArrayList<>() : List.of("REVIEW");
         }
 
-        // 已结账：有未支付子单仍可补付；未评价可评价
-        if (status == OrderStatusEnum.PAID.getCode()) {
-            if (hasUnpaidChild) {
-                actions.add("PAY");
-            }
-            if (!hasReviewed(parentOrder.getId())) {
-                actions.add("REVIEW");
-            }
-            return actions;
+        // 父单未付款 → 只能支付
+        if (parentOrder.getPayTime() == null) {
+            return List.of("PAY");
+        }
+
+        // 已支付且仍在用餐中 → 可以继续加菜；全部已出餐时也可以确认结束用餐。
+        List<String> actions = new ArrayList<>();
+        actions.add("ADD_DISH");
+        boolean allServed = parentOrder.getStatus() == OrderStatusEnum.SERVED.getCode()
+                && childOrders.stream()
+                .filter(child -> child.getStatus() != OrderStatusEnum.CANCELLED.getCode())
+                .allMatch(child -> child.getStatus() == OrderStatusEnum.SERVED.getCode()
+                        && child.getPayTime() != null);
+        if (allServed) {
+            actions.add("FINISH_MEAL");
         }
 
         return actions;

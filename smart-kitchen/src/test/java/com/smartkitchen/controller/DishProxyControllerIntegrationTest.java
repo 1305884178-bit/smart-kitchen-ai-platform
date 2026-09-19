@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -167,5 +168,23 @@ public class DishProxyControllerIntegrationTest {
         Result<Map<String, Object>> result = objectMapper.readValue(response,
                 new TypeReference<Result<Map<String, Object>>>() {});
         assertEquals(404, result.getCode());
+    }
+
+    @Test
+    public void testGetRealtimeInfoReturnsMultipleDishesInOneRequest() throws Exception {
+        String response = mockMvc.perform(get("/api/proxy/dish/realtime-info")
+                        .param("dishNames", "水煮鱼", "宫保鸡丁"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+
+        Result<List<Map<String, Object>>> result = objectMapper.readValue(response,
+                new TypeReference<Result<List<Map<String, Object>>>>() {});
+        assertEquals(200, result.getCode());
+        assertEquals(2, result.getData().size());
+        assertEquals("水煮鱼", result.getData().get(0).get("name"));
+        assertEquals(50, result.getData().get(0).get("dailyStock"));
+        assertTrue((Boolean) result.getData().get(0).get("found"));
+        assertTrue(result.getData().get(0).get("ingredients").toString().contains("草鱼"));
+        assertEquals("宫保鸡丁", result.getData().get(1).get("name"));
     }
 }

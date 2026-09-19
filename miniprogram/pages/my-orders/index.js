@@ -8,7 +8,8 @@ Page({
     size: 10,
     hasMore: true,
     loading: false,
-    loadingMore: false
+    loadingMore: false,
+    navigating: false
   },
 
   onShow() {
@@ -60,7 +61,29 @@ Page({
    */
   onOrderTap(e) {
     const orderId = e.currentTarget.dataset.id;
-    wx.navigateTo({ url: `/pages/order-detail/index?id=${orderId}` });
+    if (!orderId) {
+      wx.showToast({ title: '订单信息异常，请刷新后重试', icon: 'none' });
+      return;
+    }
+    if (this.data.navigating) return;
+
+    const url = `/pages/order-detail/index?id=${encodeURIComponent(orderId)}`;
+    this.setData({ navigating: true });
+    wx.navigateTo({
+      url,
+      success: () => this.setData({ navigating: false }),
+      fail: () => {
+        // navigateTo 的导航栈最多 10 层；栈满时替换当前列表页，仍可进入详情。
+        wx.redirectTo({
+          url,
+          success: () => this.setData({ navigating: false }),
+          fail: () => {
+            this.setData({ navigating: false });
+            wx.showToast({ title: '打开订单失败，请重试', icon: 'none' });
+          }
+        });
+      }
+    });
   },
 
   /**

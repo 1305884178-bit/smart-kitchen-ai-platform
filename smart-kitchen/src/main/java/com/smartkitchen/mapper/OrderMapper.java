@@ -25,31 +25,29 @@ public interface OrderMapper extends BaseMapper<Order> {
     List<String> selectOccupiedSeats();
 
     /**
-     * 支付登记（状态校验下沉 SQL）：仅当订单处于 ORDERED/SERVED 且未支付时才更新，
-     * SERVED 同步流转为 PAID，ORDERED 仅登记支付信息保持原状态。
+     * 支付登记（状态校验下沉 SQL）：仅当订单处于 ORDERED/SERVED 且未支付时才更新。
+     * 支付状态由 pay_time 表达；订单仍保持当前用餐状态，只有顾客结束用餐后才转为 PAID。
      * 与库存扣减 daily_stock >= ? 同一思想：以数据库原子更新做并发最终裁决。
      *
      * @return 影响行数，0 表示订单已被并发修改或重复支付
      */
     @Update("UPDATE oms_order " +
-            "SET status = CASE WHEN status = #{servedCode} THEN #{paidCode} ELSE status END, " +
-            "    payment_trade_no = #{paymentTradeNo}, pay_time = #{payTime}, update_time = NOW() " +
+            "SET payment_trade_no = #{paymentTradeNo}, pay_time = #{payTime}, update_time = NOW() " +
             "WHERE id = #{id} AND status IN (#{orderedCode}, #{servedCode}) AND pay_time IS NULL")
     int markPaidIfUnpaid(@Param("id") Long id,
                          @Param("paymentTradeNo") String paymentTradeNo,
                          @Param("payTime") LocalDateTime payTime,
                          @Param("orderedCode") int orderedCode,
-                         @Param("servedCode") int servedCode,
-                         @Param("paidCode") int paidCode);
+                         @Param("servedCode") int servedCode);
 
     /**
-     * 撤销订单（状态校验下沉 SQL）：仅当订单处于 ORDERED/SERVED 时才更新为 CANCELLED
+     * 撤销订单（状态校验下沉 SQL）：仅当订单处于 ORDERED/SERVED 且尚未付款时才更新为 CANCELLED。
      *
      * @return 影响行数，0 表示订单已被并发修改
      */
     @Update("UPDATE oms_order " +
             "SET status = #{cancelledCode}, cancel_reason = #{cancelReason}, update_time = NOW() " +
-            "WHERE id = #{id} AND status IN (#{orderedCode}, #{servedCode})")
+            "WHERE id = #{id} AND status IN (#{orderedCode}, #{servedCode}) AND pay_time IS NULL")
     int cancelIfActive(@Param("id") Long id,
                        @Param("cancelReason") String cancelReason,
                        @Param("orderedCode") int orderedCode,
@@ -57,17 +55,28 @@ public interface OrderMapper extends BaseMapper<Order> {
                        @Param("cancelledCode") int cancelledCode);
 
     /**
-     * 出餐（状态校验下沉 SQL）：仅当订单处于 ORDERED 时才更新为目标状态（SERVED 或已提前支付的 PAID）
+     * 出餐（状态校验下沉 SQL）：仅当订单处于 ORDERED 时更新为 SERVED；
+     * 是否已付款由 pay_time 单独表达，不影响用餐状态。
      *
      * @return 影响行数，0 表示订单已被并发修改
      */
     @Update("UPDATE oms_order " +
-            "SET status = #{newStatus}, complete_time = #{completeTime}, update_time = NOW() " +
+            "SET status = #{servedCode}, complete_time = #{completeTime}, update_time = NOW() " +
             "WHERE id = #{id} AND status = #{orderedCode}")
     int serveIfOrdered(@Param("id") Long id,
-                       @Param("newStatus") int newStatus,
+                       @Param("servedCode") int servedCode,
                        @Param("completeTime") LocalDateTime completeTime,
                        @Param("orderedCode") int orderedCode);
+
+    /**
+     * 顾客结束用餐：仅已付款且已出餐的订单才可从 SERVED 关闭为 PAID。
+     */
+    @Update("UPDATE oms_order " +
+            "SET status = #{paidCode}, update_time = NOW() " +
+            "WHERE id = #{id} AND status = #{servedCode} AND pay_time IS NOT NULL")
+    int finishMealIfServedAndPaid(@Param("id") Long id,
+                                  @Param("servedCode") int servedCode,
+                                  @Param("paidCode") int paidCode);
 
     /**
      * 支付超时取消（状态校验下沉 SQL）：仅当订单处于 ORDERED 且未支付时才更新为 CANCELLED。

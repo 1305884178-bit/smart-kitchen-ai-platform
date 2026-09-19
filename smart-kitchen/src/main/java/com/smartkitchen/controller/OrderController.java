@@ -54,6 +54,15 @@ public class OrderController {
     }
 
     /**
+     * 顾客确认结束用餐。仅全部菜品已出餐且均已付款时可关闭订单。
+     */
+    @PostMapping("/{id}/finish-meal")
+    public Result<Object> finishMeal(@PathVariable("id") Long id) {
+        orderService.finishMeal(id);
+        return Result.success();
+    }
+
+    /**
      * 顾客查询自己的订单列表
      * @param page 页码（默认1）
      * @param size 每页大小（默认10）

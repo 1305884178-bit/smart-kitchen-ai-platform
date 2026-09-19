@@ -8,6 +8,7 @@ import com.smartkitchen.config.UserContext;
 import com.smartkitchen.dto.AddDishDTO;
 import com.smartkitchen.dto.OrderDetailDTO;
 import com.smartkitchen.dto.OrderSubmitDTO;
+import com.smartkitchen.dto.OrderDetailVO;
 import com.smartkitchen.entity.Dish;
 import com.smartkitchen.entity.Order;
 import com.smartkitchen.entity.OrderDetail;
@@ -195,6 +196,58 @@ public class OrderServicePayFirstFlowTest {
         verify(kitchenBoardWebSocketHandler, times(1)).sendMessage(argThat(
                 msg -> msg.contains("NEW_ORDER") && msg.contains("\"id\":" + child.getId())));
         assertTrue(boardContains(child.getId()));
+    }
+
+    @Test
+    public void testUserDetail_unpaidAddedDish_onlyAllowsPaymentAndHasDeadline() {
+        Order parent = submitOne();
+        orderService.payOrder(parent.getId());
+        orderService.addDish(parent.getId(), addDishDTO(2L, 1));
+
+        OrderDetailVO detail = orderService.getUserOrderDetail(parent.getId());
+
+        assertEquals(List.of("PAY"), detail.getAvailableActions());
+        assertTrue(detail.getPayableAmount().compareTo(BigDecimal.ZERO) > 0);
+        assertNotNull(detail.getPayDeadline());
+    }
+
+    @Test
+    public void testPayAddedDish_acceptsChildOrderIdAndPaysItsParentGroup() {
+        Order parent = submitOne();
+        orderService.payOrder(parent.getId());
+        orderService.addDish(parent.getId(), addDishDTO(2L, 1));
+        Order child = orderMapper.selectOne(
+                new LambdaQueryWrapper<Order>().eq(Order::getParentOrderId, parent.getId()));
+
+        orderService.payOrder(child.getId());
+
+        assertNotNull(orderMapper.selectById(child.getId()).getPayTime());
+    }
+
+    @Test
+    public void testPaidAndServedOrder_canAddDishThenFinishMeal() {
+        Order parent = submitOne();
+        orderService.payOrder(parent.getId());
+        orderService.serveOrder(parent.getId());
+
+        Order parentAfterServe = orderMapper.selectById(parent.getId());
+        assertEquals(OrderStatusEnum.SERVED.getCode(), parentAfterServe.getStatus());
+        assertNotNull(parentAfterServe.getPayTime());
+
+        // 已付款且已出餐仍处于用餐中，可以继续加菜。
+        orderService.addDish(parent.getId(), addDishDTO(2L, 1));
+        Order child = orderMapper.selectOne(
+                new LambdaQueryWrapper<Order>().eq(Order::getParentOrderId, parent.getId()));
+        orderService.payOrder(child.getId());
+        orderService.serveOrder(child.getId());
+
+        OrderDetailVO beforeFinish = orderService.getUserOrderDetail(parent.getId());
+        assertEquals(List.of("ADD_DISH", "FINISH_MEAL"), beforeFinish.getAvailableActions());
+
+        orderService.finishMeal(parent.getId());
+        assertEquals(OrderStatusEnum.PAID.getCode(), orderMapper.selectById(parent.getId()).getStatus());
+        assertEquals(OrderStatusEnum.PAID.getCode(), orderMapper.selectById(child.getId()).getStatus());
+        assertEquals(List.of("REVIEW"), orderService.getUserOrderDetail(parent.getId()).getAvailableActions());
     }
 
     @Test

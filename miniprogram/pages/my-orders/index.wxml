@@ -1,7 +1,9 @@
 <!--pages/my-orders/index.wxml-->
 <view class="page-container">
   <!-- 订单列表 -->
-  <view class="order-card" wx:for="{{orders}}" wx:key="id" data-id="{{item.id}}" bindtap="onOrderTap">
+  <!-- 声明式跳转不依赖 JS 事件派发，确保订单卡片在真机和开发者工具中都可进入详情。 -->
+  <navigator class="order-card" wx:for="{{orders}}" wx:key="id"
+    url="/pages/order-detail/index?id={{item.id}}" open-type="navigate">
     <view class="flex-between">
       <text class="order-no">{{item.orderNo}}</text>
       <text class="status-tag status-{{item.status}}">{{_statusText(item.status)}}</text>
@@ -14,7 +16,7 @@
       {{_dishNames(item.details)}}
     </view>
     <text class="order-time">{{_formatTime(item.createTime)}}</text>
-  </view>
+  </navigator>
 
   <view wx:if="{{orders.length === 0 && !loading}}" class="empty-tip">暂无订单</view>
 

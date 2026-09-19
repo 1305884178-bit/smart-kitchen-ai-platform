@@ -64,3 +64,22 @@ class TestInternalTokenHeader:
             _invoke(dish_tools.check_dish_inventory, {"dish_name": "水煮鱼"})
 
         assert "Authorization" not in fake_client.get_calls[0][1]["headers"]
+
+    def test_batch_realtime_info_queries_two_dishes_in_one_request(self):
+        fake_client = _FakeAsyncClient(_ok_response([
+            {"queryName": "水煮鱼", "name": "水煮鱼", "found": True, "dailyStock": 8,
+             "status": 1, "ingredients": '["草鱼"]', "allergens": '["鱼"]'},
+            {"queryName": "宫保鸡丁", "name": "宫保鸡丁", "found": True, "dailyStock": 5,
+             "status": 1, "ingredients": '["鸡肉"]', "allergens": '["花生"]'}
+        ]))
+        with patch.object(dish_tools.httpx, "AsyncClient", return_value=fake_client), \
+             patch.object(settings, "ai_internal_token", "internal-test-token"):
+            out = _invoke(dish_tools.get_dishes_realtime_info,
+                          {"dish_names": ["水煮鱼", "宫保鸡丁"]})
+
+        assert "水煮鱼：当前库存 8 份；配料：草鱼；过敏原：鱼。" in out
+        assert "宫保鸡丁：当前库存 5 份；配料：鸡肉；过敏原：花生。" in out
+        args, kwargs = fake_client.get_calls[0]
+        assert args[0].endswith("/api/proxy/dish/realtime-info")
+        assert kwargs["params"] == [("dishNames", "水煮鱼"), ("dishNames", "宫保鸡丁")]
+        assert kwargs["headers"]["Authorization"] == "Bearer internal-test-token"

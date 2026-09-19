@@ -10,8 +10,8 @@ import lombok.Getter;
 @Getter
 public enum OrderStatusEnum {
     ORDERED(0, "已下单"),
-    SERVED(10, "已上菜，待结账"),
-    PAID(20, "已结账"),
+    SERVED(10, "已出餐，用餐中"),
+    PAID(20, "已结束用餐"),
     CANCELLED(90, "已撤销");
 
     private final int code;

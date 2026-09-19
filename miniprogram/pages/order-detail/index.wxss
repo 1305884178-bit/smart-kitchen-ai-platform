@@ -121,6 +121,11 @@
   color: #1976d2;
 }
 
+.action-FINISH_MEAL {
+  background: #fff3e0;
+  color: #e65100;
+}
+
 .action-REVIEW {
   background: #e8f5e9;
   color: #388e3c;

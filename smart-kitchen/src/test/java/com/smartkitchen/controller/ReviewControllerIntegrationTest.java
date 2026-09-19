@@ -102,8 +102,8 @@ public class ReviewControllerIntegrationTest {
     }
 
     @Test
-    public void testSubmitReviewSuccessForPaidNotServedOrder() throws Exception {
-        // 先付后做：支付成功（pay_time 非空）即使未出餐（仍为 ORDERED）也可评价
+    public void testSubmitReviewFailsBeforeFinishMeal() throws Exception {
+        // 已支付但仍在用餐中（ORDERED）不可评价，必须先完成出餐并结束用餐。
         Review review = new Review();
         review.setOrderId(paidNotServedOrderId);
         review.setScore(4);
@@ -117,7 +117,7 @@ public class ReviewControllerIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         Result<Object> result = objectMapper.readValue(response, new TypeReference<Result<Object>>() {});
-        assertEquals(200, result.getCode());
+        assertEquals(500, result.getCode());
     }
 
     @Test

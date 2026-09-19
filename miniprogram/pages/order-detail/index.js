@@ -33,12 +33,14 @@ Page({
     if (orderId) {
       this.setData({ orderId });
       this._loadOrderDetail();
+      this._startPolling();
     }
   },
 
   onShow() {
     if (this.data.orderId) {
       this._loadOrderDetail();
+      this._startPolling();
     }
   },
 
@@ -59,7 +61,10 @@ Page({
     request.get(`/api/order/my-detail/${this.data.orderId}`)
       .then(order => {
         const statusText = STATUS_MAP[order.status] || '未知';
-        const availableActions = order.availableActions || [];
+        // 服务端会按父子订单聚合可操作项；待补付时再做一次前端兜底，
+        // 防止旧服务端缓存或灰度版本同时返回“加菜/评价”。
+        const hasPayableAmount = Number(order.payableAmount || 0) > 0;
+        const availableActions = hasPayableAmount ? ['PAY'] : (order.availableActions || []);
         const actions = availableActions.map(a => ({
           label: this._getActionLabel(a),
           type: a
@@ -78,14 +83,20 @@ Page({
    */
   _startPayCountdown(order) {
     this._stopCountdown();
-    // 仅父单未支付且状态为已下单时倒计时（加菜待补付的场景以父单口径不展示倒计时）
-    if (!order || order.status !== 0 || order.payTime) {
+    // payDeadline 由服务端按最早的待支付父/子订单计算，覆盖加菜补付场景。
+    // 兼容尚未升级的服务端：仅普通未支付父单时回退为 createTime + 15 分钟。
+    if (!order) {
       this.setData({ countdownText: '' });
       return;
     }
-    const createTs = this._parseTime(order.createTime);
-    if (!createTs) return;
-    const deadline = createTs + 15 * 60 * 1000;
+    const deadline = this._parseTime(order.payDeadline)
+      || (!order.payTime && order.status === 0
+        ? this._parseTime(order.createTime) + 15 * 60 * 1000
+        : 0);
+    if (!deadline) {
+      this.setData({ countdownText: '' });
+      return;
+    }
     const tick = () => {
       const remain = deadline - Date.now();
       if (remain <= 0) {
@@ -126,6 +137,7 @@ Page({
     const labels = {
       ADD_DISH: '加菜',
       PAY: '支付',
+      FINISH_MEAL: '结束用餐',
       REVIEW: '评价'
     };
     return labels[action] || action;
@@ -146,6 +158,9 @@ Page({
         break;
       case 'PAY':
         this._onPay();
+        break;
+      case 'FINISH_MEAL':
+        this._onFinishMeal();
         break;
       case 'REVIEW':
         wx.navigateTo({ url: `/pages/review/index?orderId=${orderId}` });
@@ -176,6 +191,35 @@ Page({
         }
       }
     });
+  },
+
+  /**
+   * 全部菜品已出餐且均已付款后，顾客主动关闭本次用餐。
+   */
+  _onFinishMeal() {
+    wx.showModal({
+      title: '结束用餐',
+      content: '确认结束本次用餐吗？结束后将不能继续加菜。',
+      success: (res) => {
+        if (!res.confirm) return;
+        request.post(`/api/order/${this.data.orderId}/finish-meal`, {}, { showLoading: true })
+          .then(() => {
+            wx.showToast({ title: '已结束用餐', icon: 'success' });
+            this._loadOrderDetail();
+          });
+      }
+    });
+  },
+
+  /**
+   * 订单详情停留期间定时刷新：厨房完成出餐后无需退出页面，
+   * 即可拿到最新的可操作按钮（例如“结束用餐”）。
+   */
+  _startPolling() {
+    this._stopPolling();
+    this.data.pollingTimer = setInterval(() => {
+      this._loadOrderDetail();
+    }, 3000);
   },
 
   /**

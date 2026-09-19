@@ -115,6 +115,8 @@ with open(os.path.join(MINIPROGRAM_DIR, 'pages/order-detail', 'index.js'), 'r') 
 test('order-detail: 包含 _loadOrderDetail', '_loadOrderDetail' in od_js)
 test('order-detail: 包含 onAction', 'onAction' in od_js)
 test('order-detail: 包含 _onPay', '_onPay' in od_js)
+test('order-detail: 包含结束用餐确认', '_onFinishMeal' in od_js and '/finish-meal' in od_js)
+test('order-detail: 页面可见时刷新出餐状态', '_startPolling' in od_js and 'setInterval' in od_js)
 
 # my-orders
 with open(os.path.join(MINIPROGRAM_DIR, 'pages/my-orders', 'index.js'), 'r') as f:
@@ -122,6 +124,10 @@ with open(os.path.join(MINIPROGRAM_DIR, 'pages/my-orders', 'index.js'), 'r') as 
 test('my-orders: 包含 _loadOrders', '_loadOrders' in mo_js)
 test('my-orders: 包含 onReachBottom', 'onReachBottom' in mo_js)
 test('my-orders: 包含 onOrderTap', 'onOrderTap' in mo_js)
+test('my-orders: 订单跳转有失败兜底', 'wx.redirectTo' in mo_js)
+with open(os.path.join(MINIPROGRAM_DIR, 'pages/my-orders', 'index.wxml'), 'r') as f:
+    mo_wxml = f.read()
+test('my-orders: 使用声明式订单详情跳转', '<navigator' in mo_wxml and 'pages/order-detail/index?id={{item.id}}' in mo_wxml)
 
 # review
 with open(os.path.join(MINIPROGRAM_DIR, 'pages/review', 'index.js'), 'r') as f:

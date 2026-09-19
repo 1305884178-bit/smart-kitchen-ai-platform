@@ -20,7 +20,7 @@ public interface OrderService extends IService<Order> {
     String submitOrder(OrderSubmitDTO submitDTO);
 
     /**
-     * 确认结账
+     * 确认支付（先付后做；支付不等于结束用餐）
      * @param orderId 订单ID
      */
     void payOrder(Long orderId);
@@ -58,6 +58,12 @@ public interface OrderService extends IService<Order> {
      * @param addDishDTO 加菜菜品列表
      */
     void addDish(Long orderId, AddDishDTO addDishDTO);
+
+    /**
+     * 顾客确认结束用餐。订单组内所有未取消订单均已付款、已出餐后，关闭为 PAID。
+     * @param orderId 原订单ID（父订单）
+     */
+    void finishMeal(Long orderId);
 
     /**
      * 顾客历史订单分页查询

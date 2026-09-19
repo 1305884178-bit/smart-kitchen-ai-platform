@@ -152,3 +152,68 @@ async def get_dish_ingredients(dish_name: str, config: RunnableConfig) -> str:
         return "服务暂不可用，请稍后再试。"
     except Exception as e:
         return f"查询配料时发生错误：{str(e)}"
+
+
+@tool
+async def get_dishes_realtime_info(dish_names: list[str], config: RunnableConfig) -> str:
+    """
+    批量查询多道菜的实时库存、配料和过敏原。
+    当用户同时询问多道菜，或同时询问库存与配料时，优先使用此工具。
+    dish_names 传入准确菜名列表，单次最多 10 道菜。
+    """
+    names = []
+    for name in dish_names:
+        normalized = str(name).strip()
+        if normalized and normalized not in names:
+            names.append(normalized)
+    if not names:
+        return "请提供需要查询的菜品名称。"
+    if len(names) > 10:
+        return "一次最多查询 10 道菜，请分批提问。"
+    if _cancelled(config):
+        return "本次对话已取消。"
+    try:
+        timeout = httpx.Timeout(timeout=5, connect=1.5)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(
+                f"{settings.java_api_url}/api/proxy/dish/realtime-info",
+                params=[("dishNames", name) for name in names],
+                headers=internal_auth_headers(),
+            )
+        if _cancelled(config):
+            return "本次对话已取消。"
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 200:
+            return f"查询菜品实时信息失败：{data.get('message', '未知错误')}"
+
+        lines = []
+        for item in data.get("data") or []:
+            query_name = item.get("queryName") or "该菜品"
+            if not item.get("found"):
+                lines.append(f"未找到名为 {query_name} 的菜品。")
+                continue
+            name = item.get("name") or query_name
+            if item.get("status") == 0:
+                stock_text = "目前已停售"
+            else:
+                stock_text = f"当前库存 {item.get('dailyStock')} 份"
+            ingredients = _parse_json_list(item.get("ingredients"))
+            allergens = _parse_json_list(item.get("allergens"))
+            parts = [stock_text]
+            if ingredients:
+                parts.append(f"配料：{'、'.join(ingredients)}")
+            elif item.get("ingredients") and item.get("ingredients") != '[]':
+                parts.append(f"配料：{item.get('ingredients')}")
+            if allergens:
+                parts.append(f"过敏原：{'、'.join(allergens)}")
+            elif item.get("allergens") and item.get("allergens") != '[]':
+                parts.append(f"过敏原：{item.get('allergens')}")
+            lines.append(f"{name}：{'；'.join(parts)}。")
+        return "\n".join(lines) or "暂时没有查询到菜品实时信息。"
+    except httpx.TimeoutException:
+        return "查询菜品实时信息超时，请稍后再试。"
+    except httpx.ConnectError:
+        return "服务暂不可用，请稍后再试。"
+    except Exception as e:
+        return f"查询菜品实时信息时发生错误：{str(e)}"

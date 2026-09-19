@@ -130,7 +130,7 @@ public class OrderServiceConcurrencyTest {
     }
 
     @Test
-    public void testConcurrentPay_servedOrder_transitionsToPaidOnce() throws Exception {
+    public void testConcurrentPay_servedOrder_keepsDiningStatusOnce() throws Exception {
         Order order = newOrder(OrderStatusEnum.SERVED.getCode());
         Long orderId = order.getId();
 
@@ -138,7 +138,7 @@ public class OrderServiceConcurrencyTest {
 
         assertEquals(19, errors.size(), "20 并发支付应恰好 1 笔成功、19 笔失败");
         Order after = orderMapper.selectById(orderId);
-        assertEquals(OrderStatusEnum.PAID.getCode(), after.getStatus(), "SERVED 结账应流转为 PAID");
+        assertEquals(OrderStatusEnum.SERVED.getCode(), after.getStatus(), "支付只登记付款，不结束用餐");
         assertNotNull(after.getPaymentTradeNo());
     }
 
@@ -196,7 +196,7 @@ public class OrderServiceConcurrencyTest {
                 "支付与撤销并发应恰好一方成功，实际: " + outcomes);
         Order after = orderMapper.selectById(orderId);
         if (outcomes.contains("PAY_OK")) {
-            assertEquals(OrderStatusEnum.PAID.getCode(), after.getStatus(), "支付胜出后状态应为 PAID 且不可被撤销覆盖");
+            assertEquals(OrderStatusEnum.SERVED.getCode(), after.getStatus(), "支付胜出后保持用餐状态且不可被撤销覆盖");
             assertNotNull(after.getPaymentTradeNo());
         } else {
             assertEquals(OrderStatusEnum.CANCELLED.getCode(), after.getStatus(), "撤销胜出后状态应为 CANCELLED 且不可被支付覆盖");
