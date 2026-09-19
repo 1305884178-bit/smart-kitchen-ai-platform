@@ -67,89 +67,75 @@ python3 tests/test_miniprogram.py
 
 ## 小程序点餐与用餐闭环
 
-### 1. 微信小程序点单
+顾客可在小程序内完成选菜、支付、加菜、结束用餐，并通过 AI 客服获取菜品推荐和饮食提示。
 
-按分类浏览菜品、查看库存状态，并将菜品加入购物车后提交订单。
+### 点餐与支付
 
-![微信小程序点单](docs/images/miniprogram-ordering.png)
+<p align="center">
+  <img src="docs/images/miniprogram-ordering.png" alt="微信小程序点单" width="31%" />
+  <img src="docs/images/miniprogram-payment.png" alt="支付页面" width="31%" />
+  <img src="docs/images/miniprogram-order-detail.png" alt="订单详情" width="31%" />
+</p>
 
-### 2. 支付页面
+<p align="center"><sub>① 分类浏览与购物车下单　　② 15 分钟支付倒计时　　③ 支付后的订单明细</sub></p>
 
-订单创建后显示 15 分钟支付倒计时，超时未支付将自动取消。
+- 顾客可按分类浏览菜品，实时看到“有货 / 售罄”状态。
+- 订单创建后进入支付页，未支付订单将在 15 分钟后自动取消。
+- 支付成功后可查看订单明细，并在用餐期间发起加菜。
 
-![支付页面](docs/images/miniprogram-payment.png)
+### 加菜、出餐与结束用餐
 
-### 3. 订单详情
+<p align="center">
+  <img src="docs/images/miniprogram-add-dish.png" alt="确认加菜" width="31%" />
+  <img src="docs/images/miniprogram-served.png" alt="厨房出餐后的订单详情" width="31%" />
+  <img src="docs/images/miniprogram-ai-customer-service.png" alt="AI 客服" width="31%" />
+</p>
 
-支付后可查看菜品明细，并在用餐期间进入加菜流程。
+<p align="center"><sub>④ 确认座位号后提交加菜　　⑤ 厨房出餐后继续加菜或结束用餐　　⑥ AI 客服饮食咨询</sub></p>
 
-![订单详情](docs/images/miniprogram-order-detail.png)
-
-### 4. 加菜确认
-
-从订单详情进入点单页，确认座位号后提交加菜；加菜金额需补付后才推送厨房。
-
-![加菜页面](docs/images/miniprogram-add-dish.png)
-
-### 5. 厨房出餐后
-
-全部菜品完成出餐后，订单显示“已上菜”，顾客可继续加菜或结束用餐。
-
-![已出餐订单详情](docs/images/miniprogram-served.png)
-
-### 6. AI 客服
-
-支持基于知识库推荐菜品，并结合实时配料、过敏原等信息提供饮食提示。
-
-![AI 客服](docs/images/miniprogram-ai-customer-service.png)
+- 加菜会生成子订单，补付成功后才会同步到厨房制作。
+- 全部菜品出餐后，订单显示“已上菜”，顾客可以继续加菜或结束用餐并评价。
+- AI 客服支持知识库菜品推荐，并结合实时配料、过敏原提供饮食提示。
 
 ## 管理端界面展示
 
-### 1. 管理端首页
+管理端覆盖经营总览、厨房协作、订单、菜品、库存、AI 预测、知识库与评价管理。
 
-![管理端首页](docs/images/admin-dashboard.png)
+### 经营总览与厨房协作
 
-### 2. 厨房看板
+<p align="center">
+  <img src="docs/images/admin-dashboard.png" alt="管理端首页" width="48%" />
+  <img src="docs/images/admin-kitchen-board.png" alt="厨房看板" width="48%" />
+</p>
 
-实时接收已支付订单，并支持完成出餐。
+<p align="center"><sub>仪表盘：今日订单、营收、待出餐及库存预警　　厨房看板：实时接收订单并完成出餐</sub></p>
 
-![厨房看板](docs/images/admin-kitchen-board.png)
+### 订单与菜品管理
 
-### 3. 订单管理
+<p align="center">
+  <img src="docs/images/admin-orders.png" alt="订单管理" width="48%" />
+  <img src="docs/images/admin-dishes.png" alt="菜品管理" width="48%" />
+</p>
 
-支持按订单状态和座位号筛选，查看订单详情、撤销订单和完成出餐。
+<p align="center"><sub>订单管理：筛选、详情、撤销与出餐操作　　菜品管理：分类、价格、库存、配料与过敏原</sub></p>
 
-![订单管理](docs/images/admin-orders.png)
+### 库存与 AI 备菜预测
 
-### 4. 菜品管理
+<p align="center">
+  <img src="docs/images/admin-inventory.png" alt="库存管理" width="48%" />
+  <img src="docs/images/admin-ai-preparation-forecast.png" alt="AI 备菜预测" width="48%" />
+</p>
 
-维护菜品分类、价格、库存、配料、过敏原和上下架状态。
+<p align="center"><sub>库存管理：库存预警与人工调整　　AI 备菜预测：建议量、置信度、推理说明与人工确认</sub></p>
 
-![菜品管理](docs/images/admin-dishes.png)
+### AI 知识库与评价管理
 
-### 5. 库存管理
+<p align="center">
+  <img src="docs/images/admin-ai-knowledge-base.png" alt="AI 知识库" width="48%" />
+  <img src="docs/images/admin-reviews.png" alt="评价管理" width="48%" />
+</p>
 
-展示库存预警状态，并支持人工调整库存。
-
-![库存管理](docs/images/admin-inventory.png)
-
-### 6. AI 备菜预测
-
-基于历史数据给出备菜建议量、置信度和推理说明，管理员可确认覆盖。
-
-![AI 备菜预测](docs/images/admin-ai-preparation-forecast.png)
-
-### 7. AI 知识库
-
-支持上传、查看、编辑和归档知识文档，为客服 AI 提供检索依据。
-
-![AI 知识库](docs/images/admin-ai-knowledge-base.png)
-
-### 8. 评价管理
-
-集中查看订单评分与评价内容，完整展示五级评分。
-
-![评价管理](docs/images/admin-reviews.png)
+<p align="center"><sub>AI 知识库：上传、查看、编辑与归档知识文档　　评价管理：完整展示五级评分和评价内容</sub></p>
 
 ## 贡献与许可证
 
