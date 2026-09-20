@@ -1,6 +1,10 @@
 node_modules/
 dist/
+# Local secrets and environment-specific configuration. Keep only checked-in
+# `.env.example` templates so credentials and endpoints never enter Git.
 .env
+.env.*
+!.env.example
 .DS_Store
 venv/
 .venv/
@@ -23,8 +27,5 @@ LangGraph备菜预测面试题.md
 smart-kitchen-ai/.deps/
 
 # AI 服务运行后产生的缓存、WAL 与索引不纳入版本控制。
-smart-kitchen-ai/data/milvus.db/LOCK
-smart-kitchen-ai/data/milvus.db/**/wal/
-smart-kitchen-ai/data/milvus.db/collections/ai_chat_semantic_cache/partitions/_default/data/data_*.parquet
-smart-kitchen-ai/data/milvus.db/collections/ai_chat_semantic_cache/partitions/_default/indexes/data_*.idx
-smart-kitchen-ai/data/milvus.db/collections/kitchen_knowledge/partitions/_default/indexes/data_*.idx
+# The database can contain cached prompts and knowledge-base data; keep it local.
+smart-kitchen-ai/data/milvus.db/

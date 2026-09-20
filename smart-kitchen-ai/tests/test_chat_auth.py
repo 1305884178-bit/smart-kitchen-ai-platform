@@ -6,7 +6,7 @@
 - jti 命中 Redis 黑名单 auth:blacklist:{jti} → 401（对齐 RedisTokenStore.isBlacklisted）
 - 用户级吊销 auth:revoke:{userId}：iat*1000 < 吊销时间戳 → 401（对齐 isUserRevoked）
 - Redis 不可用时验签通过仍放行（打 warning），不把客服打挂
-- 限流走 Redis INCR+TTL；Redis 挂了降级内存滑动窗口
+- 限流走 Redis Lua + ZSET 滑动窗口；Redis 挂了降级内存滑动窗口
 """
 import base64
 import hashlib
@@ -59,11 +59,11 @@ def clear_rate_buckets():
 
 @pytest.fixture
 def redis_mock():
-    """替换 auth 模块里的 redis 客户端；默认无黑名单、无吊销、限流计数从 1 开始"""
+    """替换 auth 模块里的 Redis 客户端；默认 Lua 限流脚本放行。"""
     mock = MagicMock()
     mock.exists.return_value = 0
     mock.get.return_value = None
-    mock.incr.return_value = 1
+    mock.eval.return_value = [1, 1, 0]
     with patch.object(auth, "redis_client", mock):
         yield mock
 
@@ -132,7 +132,7 @@ class TestChatJwtAlignment:
         broken = MagicMock()
         broken.exists.side_effect = ConnectionError("redis down")
         broken.get.side_effect = ConnectionError("redis down")
-        broken.incr.side_effect = ConnectionError("redis down")
+        broken.eval.side_effect = ConnectionError("redis down")
         token = _make_jwt(settings.jwt_secret)
         with patch.object(auth, "redis_client", broken):
             with patch.object(ChatService, "get_chat_response_generator",
@@ -158,29 +158,32 @@ def _make_jwt_without_claim(secret: str, drop: str) -> str:
 
 class TestChatRateLimit:
     def test_redis_window_blocks_over_limit(self, client, redis_mock):
-        # Redis INCR 超限 → 429；key 含 userId
-        redis_mock.incr.return_value = 31  # 默认阈值 30
+        # Redis Lua 返回拒绝 → 429；key 含 userId
+        redis_mock.eval.return_value = [0, 30, 12]
         token = _make_jwt(settings.jwt_secret)
         resp = client.post("/ai/chat", json={"message": "你好"},
                            headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 429
-        redis_mock.incr.assert_called_with("chat:rate:1001")
+        assert "12 秒后再试" in resp.json()["detail"]
+        args = redis_mock.eval.call_args.args
+        assert args[1] == 1
+        assert args[2] == "chat:rate:sliding:1001"
 
-    def test_redis_first_hit_sets_ttl(self, client, redis_mock):
-        redis_mock.incr.return_value = 1
+    def test_redis_lua_window_allows_request(self, client, redis_mock):
+        redis_mock.eval.return_value = [1, 1, 0]
         token = _make_jwt(settings.jwt_secret)
         with patch.object(ChatService, "get_chat_response_generator",
                           return_value=_mock_chat_generator()):
             resp = client.post("/ai/chat", json={"message": "你好"},
                                headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
-        redis_mock.expire.assert_called_with("chat:rate:1001", 60)
+        assert redis_mock.eval.called
 
     def test_redis_down_falls_back_to_memory_window(self, client):
         broken = MagicMock()
         broken.exists.side_effect = ConnectionError("redis down")
         broken.get.side_effect = ConnectionError("redis down")
-        broken.incr.side_effect = ConnectionError("redis down")
+        broken.eval.side_effect = ConnectionError("redis down")
         token = _make_jwt(settings.jwt_secret)
         with patch.object(auth, "redis_client", broken):
             with patch.object(settings, "chat_rate_limit_per_minute", 2):

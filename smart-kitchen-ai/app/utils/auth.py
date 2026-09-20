@@ -12,7 +12,7 @@
   Redis 不可用时验签通过仍放行并打 warning，与语义缓存降级策略一致。
 - /ai/knowledge、/ai/predict：仅在配置 AI_INTERNAL_TOKEN 后强制校验内部 token，
   未配置时保持开放（本地开发默认），避免把服务做成完全公网裸奔的同时不破坏现有联调。
-- 限流：优先 Redis（INCR + TTL 固定窗口近似滑动窗口），按 userId / 内部主体 / IP 计数；
+- 限流：优先 Redis Lua + ZSET 严格滑动窗口，按 userId / 内部主体 / IP 计数；
   Redis 挂了降级为进程内存滑动窗口，不引入新中间件。
 """
 import base64
@@ -21,6 +21,7 @@ import hmac
 import json
 import logging
 import time
+import uuid
 from collections import defaultdict, deque
 from threading import Lock
 
@@ -34,8 +35,35 @@ logger = logging.getLogger(__name__)
 # 与 Java RedisTokenStore 一致的 Redis key 前缀
 BLACKLIST_KEY_PREFIX = "auth:blacklist:"
 REVOKE_KEY_PREFIX = "auth:revoke:"
-# 聊天限流 key 前缀
-RATE_LIMIT_KEY_PREFIX = "chat:rate:"
+# 聊天限流 key 前缀。使用独立后缀，避免与旧版 INCR 字符串计数 key 类型冲突。
+RATE_LIMIT_KEY_PREFIX = "chat:rate:sliding:"
+RATE_LIMIT_WINDOW_MS = 60_000
+
+# Redis Lua 滑动窗口：脚本在 Redis 内完成清理、计数、写入，避免多实例并发请求
+# 在“先读后写”之间穿透额度。TIME 由 Redis 提供，避免应用服务器时钟不一致。
+# 返回值：[是否放行(1/0), 当前窗口请求数, 建议重试秒数]
+REDIS_SLIDING_WINDOW_SCRIPT = """
+local time = redis.call('TIME')
+local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+local window = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local member = ARGV[3]
+
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, now - window)
+local count = redis.call('ZCARD', KEYS[1])
+if count >= limit then
+    local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+    local retryAfter = 0
+    if #oldest >= 2 then
+        retryAfter = math.max(0, math.ceil((tonumber(oldest[2]) + window - now) / 1000))
+    end
+    return {0, count, retryAfter}
+end
+
+redis.call('ZADD', KEYS[1], now, member)
+redis.call('PEXPIRE', KEYS[1], window)
+return {1, count + 1, 0}
+"""
 
 
 def _b64url_decode(data: str) -> bytes:
@@ -139,7 +167,7 @@ def internal_auth_headers() -> dict:
     return {}
 
 
-# ---------- 限流：Redis（INCR+TTL）优先，进程内存滑动窗口兜底 ----------
+# ---------- 限流：Redis Lua 滑动窗口优先，进程内存滑动窗口兜底 ----------
 
 _rate_lock = Lock()
 _rate_buckets: dict[str, deque] = defaultdict(deque)
@@ -157,6 +185,26 @@ def _check_rate_limit_memory(key: str, limit: int):
         bucket.append(now)
 
 
+def _check_rate_limit_redis(key: str, limit: int):
+    """Redis 全局滑动窗口；Redis 执行异常交由调用方降级。"""
+    result = redis_client.eval(
+        REDIS_SLIDING_WINDOW_SCRIPT,
+        1,
+        f"{RATE_LIMIT_KEY_PREFIX}{key}",
+        RATE_LIMIT_WINDOW_MS,
+        limit,
+        uuid.uuid4().hex,
+    )
+    # Redis Lua 返回整数数组；兼容个别 Redis 客户端将元素解码为字符串的情况。
+    allowed = int(result[0]) if result else 0
+    if not allowed:
+        retry_after = int(result[2]) if len(result) > 2 else 0
+        detail = "请求过于频繁，请稍后再试"
+        if retry_after > 0:
+            detail = f"请求过于频繁，请 {retry_after} 秒后再试"
+        raise HTTPException(status_code=429, detail=detail)
+
+
 def check_rate_limit(principal: dict):
     limit = settings.chat_rate_limit_per_minute
     if limit <= 0:
@@ -165,13 +213,7 @@ def check_rate_limit(principal: dict):
         principal.get("userId") or principal.get("sub") or principal.get("_ip") or "unknown"
     )
     try:
-        # Redis 固定窗口近似滑动窗口：INCR 首次置 60s TTL，超限拒绝
-        redis_key = f"{RATE_LIMIT_KEY_PREFIX}{key}"
-        count = redis_client.incr(redis_key)
-        if count == 1:
-            redis_client.expire(redis_key, 60)
-        if count > limit:
-            raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+        _check_rate_limit_redis(key, limit)
     except HTTPException:
         raise
     except Exception as e:
