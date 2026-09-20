@@ -12,9 +12,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# 个人面试笔记与问答文档，不上传
-*面试*.md
-
 # Python 依赖安装目录（本地构建产物）
 smart-kitchen-ai/.deps/
 
