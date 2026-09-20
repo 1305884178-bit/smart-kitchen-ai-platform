@@ -6,6 +6,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.api import knowledge, chat, predict
 from app.services.predict_service import trigger_prediction
 from app.services.kb_cleanup_service import run_cleanup_job
+from app.config import validate_security_settings
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +27,7 @@ async def kb_cleanup_job():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    validate_security_settings()
     scheduler.add_job(daily_predict_job, 'cron', hour=2, minute=0)
     # 知识库清理：每天 03:30；active 文档不设 TTL、永不过期
     scheduler.add_job(kb_cleanup_job, 'cron', hour=3, minute=30)

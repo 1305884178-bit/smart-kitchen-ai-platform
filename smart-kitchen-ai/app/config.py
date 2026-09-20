@@ -61,8 +61,8 @@ class Settings:
     # 多轮对话：送入 ReAct Agent 的最近消息条数（含当前条），禁止全量历史
     chat_history_max_messages = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "8"))
 
-    # /ai/chat 鉴权：与 Java 端一致的 HS256 JWT 密钥（默认值为 Java application.yml 的开发默认值）
-    jwt_secret = os.getenv("JWT_SECRET", "smartKitchenSecretKeyPleaseChangeInProdEnv")
+    # /ai/chat 鉴权：与 Java 端一致的 HS256 JWT 密钥，必须显式注入。
+    jwt_secret = os.getenv("JWT_SECRET", "").strip()
     # Java 服务间调用的内部 token（配置后 /ai/knowledge、/ai/predict 强制校验）
     ai_internal_token = os.getenv("AI_INTERNAL_TOKEN", "")
     # 客服接口限流：每用户/每 IP 每分钟最大请求数
@@ -78,3 +78,14 @@ class Settings:
     app_port = int(os.getenv("APP_PORT", "8000"))
 
 settings = Settings()
+
+
+def validate_security_settings() -> None:
+    """Require an explicitly injected signing key in production."""
+    environment = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "")).strip().lower()
+    if environment not in {"prod", "production"}:
+        return
+    if len(settings.jwt_secret.encode("utf-8")) < 32:
+        raise RuntimeError(
+            "Production requires JWT_SECRET to be explicitly configured with at least 32 bytes."
+        )

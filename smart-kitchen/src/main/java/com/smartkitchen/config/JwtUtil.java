@@ -5,10 +5,13 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import jakarta.annotation.PostConstruct;
 import java.nio.charset.StandardCharsets;
 import java.security.Key;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,6 +19,8 @@ import java.util.UUID;
 
 @Component
 public class JwtUtil {
+
+    private final Environment environment;
 
     public static final String TOKEN_TYPE_ACCESS = "access";
     public static final String TOKEN_TYPE_REFRESH = "refresh";
@@ -29,6 +34,31 @@ public class JwtUtil {
 
     @Value("${smart-kitchen.jwt.refresh-expiration}")
     private Long refreshExpiration;
+
+    public JwtUtil(Environment environment) {
+        this.environment = environment;
+    }
+
+    @PostConstruct
+    private void validateSecret() {
+        if (!isProduction()) {
+            return;
+        }
+        if (secret == null || secret.getBytes(StandardCharsets.UTF_8).length < 32) {
+            throw new IllegalStateException(
+                    "Production requires JWT_SECRET to be explicitly configured with at least 32 bytes."
+            );
+        }
+    }
+
+    private boolean isProduction() {
+        String appEnv = environment.getProperty("APP_ENV", "").trim();
+        return "prod".equalsIgnoreCase(appEnv)
+                || "production".equalsIgnoreCase(appEnv)
+                || Arrays.stream(environment.getActiveProfiles())
+                .anyMatch(profile -> "prod".equalsIgnoreCase(profile)
+                        || "production".equalsIgnoreCase(profile));
+    }
 
     private Key getSigningKey() {
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
