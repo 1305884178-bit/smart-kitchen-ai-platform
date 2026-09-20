@@ -6,6 +6,11 @@ dist/
 .env.*
 !.env.example
 .DS_Store
+.idea/
+
+# WeChat DevTools stores per-developer preferences here.
+miniprogram/project.private.config.json
+
 venv/
 .venv/
 __pycache__/

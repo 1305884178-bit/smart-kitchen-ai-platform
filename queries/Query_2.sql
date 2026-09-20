@@ -17,9 +17,3 @@ CREATE TABLE IF NOT EXISTS `sys_user` (
 
 -- 2. 清理表数据（可选，如果是空表可不执行）
 TRUNCATE TABLE `sys_user`;
-
--- 3. 插入测试用户数据（用于账号密码登录测试）
-INSERT INTO `sys_user` (`id`, `username`, `password`, `nickname`, `role`, `create_time`) VALUES
-                                                                                             (1000, 'admin', '123456', '管理员', 'ADMIN', NOW()),
-                                                                                             (1001, 'customer1', '123456', '顾客张三', 'CUSTOMER', NOW()),
-                                                                                             (1002, 'customer2', '123456', '顾客李四', 'CUSTOMER', NOW());
